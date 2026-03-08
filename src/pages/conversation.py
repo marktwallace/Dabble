@@ -27,9 +27,14 @@ def render():
             with st.chat_message("assistant"):
                 _render_assistant_turn(turn, is_latest=(i == n - 1))
 
+    if st.session_state.get("pending_input"):
+        _run_agent(st.session_state.pending_input)
+        st.session_state.pending_input = None
+        st.rerun()
+
     user_input = st.chat_input("Ask anything...")
     if user_input:
-        _handle_input(user_input.strip())
+        _enqueue_input(user_input.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -55,18 +60,26 @@ def _init_session():
 # Input handling
 # ---------------------------------------------------------------------------
 
-def _handle_input(text):
+def _enqueue_input(text):
     if text == "/learn":
         _handle_learn()
         return
+    if text == "/report":
+        _handle_report()
+        return
 
     path = st.session_state.conversation_path
-    handler = st.session_state.handler
-    is_first = not st.session_state.turns
-
     st.session_state.turns.append({"role": "user", "text": text})
     st.session_state.messages.append({"role": "user", "content": text})
     conv_file.append_user(path, text)
+    st.session_state.pending_input = text
+    st.rerun()
+
+
+def _run_agent(text):
+    path = st.session_state.conversation_path
+    handler = st.session_state.handler
+    is_first = len(st.session_state.turns) == 1  # only the user turn just added
 
     prev_len = len(st.session_state.messages)
     st.session_state.tables_to_show = []
@@ -86,8 +99,6 @@ def _handle_input(text):
     for turn in _extract_assistant_turns(new_messages):
         st.session_state.turns.append(turn)
 
-    st.rerun()
-
 
 def _handle_learn():
     path = st.session_state.conversation_path
@@ -97,6 +108,11 @@ def _handle_learn():
     st.session_state.learn_chunks = chunks
     st.session_state.learn_source_path = path
     st.session_state.page = "learn_review"
+    st.rerun()
+
+
+def _handle_report():
+    st.session_state.page = "report_review"
     st.rerun()
 
 

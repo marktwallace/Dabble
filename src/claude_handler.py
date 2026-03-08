@@ -200,7 +200,7 @@ class ClaudeHandler:
         if err:
             st.session_state.figures[key] = {"error": err}
             return f"Chart error:\n{err}"
-        st.session_state.figures[key] = {"figure": fig}
+        st.session_state.figures[key] = {"figure": fig, "code": code, "dataframe_id": dataframe_id}
         return "Chart rendered."
 
     def _run_python(self, dataframe_id: str, code: str, output_id: str) -> str:

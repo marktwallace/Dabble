@@ -177,5 +177,6 @@ db/
 # Dumps
 dumps/
 logs/
-training/
-playbooks/
+conversations/
+knowledge/
+reports/
