@@ -34,7 +34,7 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 
 **UI layout — conversation view:**
 
-- `st.chat_input()` is the only input. It handles regular messages, /learn, and /presentation uniformly — no special buttons.
+- `st.chat_input()` is the only input. It handles regular messages, /learn, and /report uniformly — no special buttons.
 - A spinner shows while the tool loop is running ("working...").
 - Each assistant turn renders as:
   1. One `st.expander` per tool call, labelled with the tool name and dataframe_id (e.g. *"SQL: abundance\_by\_type — 312 rows"*). Collapsed by default for older turns; **open by default for the most recent turn** so the analyst can immediately verify what just ran.
@@ -131,15 +131,17 @@ The `knowledge/` directory is the durable source of truth. ChromaDB can be fully
 
 ### 5. /report Command
 
-When the analyst types `/report`, the app navigates to a report review screen (not a dialog — a full Streamlit page). On that screen the analyst selects which chart or dataframe to include, then clicks Generate to produce a standalone Streamlit Python file.
+When the analyst types `/report`, the app navigates to a report review screen (not a dialog — a full Streamlit page). On that screen the analyst selects one or more items to include, then clicks Generate to produce a standalone Streamlit Python file.
 
-**Default selection:** the most recently rendered chart. If no chart exists in the session, fall back to the most recently produced dataframe.
+**Selection UI:** Checkboxes, one per available artifact, listed in reverse chronological order (most recent first). The first item is checked by default; the rest are unchecked. Up to 5 are shown initially; a "Show all N options" button reveals the rest. The list includes all charts rendered without error and all dataframes produced by `run_sql` or `run_python`.
+
+**Chronological ordering:** A session-scoped `artifact_order` list records each `run_sql` and successful `render_chart` call in insertion order. The review screen walks it in reverse to produce the option list. This preserves true cross-type ordering — not just within-dict ordering.
 
 **Type 1 — Static snapshot (implemented):**
 
-The generated file embeds the selected dataframe as a CSV string literal and reproduces the Plotly chart code verbatim. This guarantees the report renders identically to what the analyst saw in the chat — the chart code is the same code Claude produced, run against the same data.
+The generated file embeds each selected dataframe as a CSV string literal and reproduces each Plotly chart code verbatim. This guarantees the report renders identically to what the analyst saw in the chat — the chart code is the same code Claude produced, run against the same data.
 
-Generated file structure:
+**Single-item report structure:**
 
 ```python
 import io
@@ -158,20 +160,48 @@ df = pd.read_csv(io.StringIO(DATA))
 
 <plotly code verbatim from render_chart call>
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 ```
 
-For a dataframe-only report (no chart), `st.dataframe(df, use_container_width=True)` is used instead.
+For a dataframe-only report (no chart), `st.dataframe(df, width="stretch")` is used instead.
+
+**Multi-item report structure:** Each selected item becomes a section with `st.subheader()` and `st.divider()` between sections. Each section re-assigns `DATA` and `df` immediately before the chart or table code, so verbatim chart code works correctly regardless of ordering:
+
+```python
+st.subheader("Track Durations")
+
+DATA = """<csv>"""
+
+df = pd.read_csv(io.StringIO(DATA))
+
+<chart code>
+
+st.plotly_chart(fig, width="stretch")
+
+st.divider()
+
+st.subheader("Songs By Artist")
+
+DATA = """<csv>"""
+
+df = pd.read_csv(io.StringIO(DATA))
+
+<chart code>
+
+st.plotly_chart(fig, width="stretch")
+```
+
+The report title is derived from the first two selected item names (e.g. "Track Durations & Songs By Artist").
 
 **Type 2 — Parameterized live report (future scope):** a report that re-queries DuckDB with user-supplied parameters (e.g. a date range). Not implemented in v2.
 
-**File naming:** `reports/<timestamp>_<chart_or_dataframe_id>.py`, e.g. `reports/2026-03-08T14-30_tracks_by_length.py`.
+**File naming:** `reports/<timestamp>_<first_item_id>.py`, e.g. `reports/2026-03-08T14-30_track_durations.py`.
 
 **No list-pet dependency.** Generated files import only: `streamlit`, `pandas`, `plotly`. The analyst runs them with `streamlit run reports/<filename>.py`.
 
-**Entry screen:** Generated reports appear in a Reports section on the entry screen, listed by date descending. Each entry shows the filename stem and timestamp.
+**Entry screen:** Generated reports appear in a Reports section on the entry screen, listed by date descending. Each entry is an expander showing the `streamlit run` command.
 
-**Template location:** The report file template is an f-string in `src/pages/report_review.py`. It is short and deterministic — no LLM call is needed for generation.
+**Template location:** The report file templates are f-strings in `src/pages/report_review.py`. Generation is deterministic — no LLM call is needed.
 
 ---
 
@@ -189,7 +219,7 @@ ChromaDB persistent store at `db/knowledge_base/`. Embeddings via OpenAI text-em
 
 ## Architecture
 
-**Three Streamlit pages:** entry screen, conversation view, /learn confirmation screen.
+**Four Streamlit pages:** entry screen, conversation view, /learn confirmation screen, /report review screen.
 
 **No metadata database.** Conversation management is the filesystem.
 
@@ -265,9 +295,10 @@ Listed in dependency order — each file should be completable and testable befo
 6. `src/pages/entry.py` — Streamlit entry screen: list conversations, new conversation button
 7. `src/pages/conversation.py` — Streamlit conversation view: chat loop, inline charts and tables
 8. `src/pages/learn_review.py` — Streamlit /learn confirmation screen: list extracted chunks, approve/reject each
-9. `app.py` — top-level Streamlit multi-page entry point
-10. `tools/seed_knowledge_base.py` — one-time script to load `knowledge/` into ChromaDB
-11. `tools/rebuild_knowledge_base.py` — clear and reload ChromaDB from `knowledge/`
+9. `src/pages/report_review.py` — Streamlit /report review screen: checkbox selection, multi-item report generation
+10. `app.py` — top-level Streamlit multi-page entry point
+11. `tools/seed_knowledge_base.py` — one-time script to load `knowledge/` into ChromaDB
+12. `tools/rebuild_knowledge_base.py` — clear and reload ChromaDB from `knowledge/`
 
 ### Guiding constraint
 

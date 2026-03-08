@@ -25,7 +25,7 @@ def render():
                 st.markdown(turn["text"])
         else:
             with st.chat_message("assistant"):
-                _render_assistant_turn(turn, is_latest=(i == n - 1))
+                _render_assistant_turn(turn, turn_idx=i, is_latest=(i == n - 1))
 
     if st.session_state.get("pending_input"):
         _run_agent(st.session_state.pending_input)
@@ -47,6 +47,7 @@ def _init_session():
         st.session_state._active_path = path
         st.session_state.dataframes = {}
         st.session_state.figures = {}
+        st.session_state.artifact_order = []
         st.session_state.tables_to_show = []
         st.session_state.turns = []
 
@@ -112,6 +113,7 @@ def _handle_learn():
 
 
 def _handle_report():
+    st.session_state.report_show_all = False
     st.session_state.page = "report_review"
     st.rerun()
 
@@ -188,7 +190,7 @@ def _extract_assistant_turns(new_messages):
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _render_assistant_turn(turn, is_latest):
+def _render_assistant_turn(turn, turn_idx, is_latest):
     for tc in turn["tool_calls"]:
         with st.expander(_expander_label(tc["name"], tc["inputs"]), expanded=is_latest):
             name = tc["name"]
@@ -199,18 +201,19 @@ def _render_assistant_turn(turn, is_latest):
             if tc["result"]:
                 st.text(tc["result"])
 
-    for tc in turn["tool_calls"]:
+    for tc_idx, tc in enumerate(turn["tool_calls"]):
         if tc["name"] == "show_table":
-            df = st.session_state.dataframes.get(tc["inputs"].get("dataframe_id"))
+            df_id = tc["inputs"].get("dataframe_id")
+            df = st.session_state.dataframes.get(df_id)
             if df is not None:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch", key=f"table_{turn_idx}_{tc_idx}_{df_id}")
 
-    for tc in turn["tool_calls"]:
+    for tc_idx, tc in enumerate(turn["tool_calls"]):
         if tc["name"] == "render_chart":
             key = tc["inputs"].get("chart_id") or tc["inputs"].get("dataframe_id")
             fig_data = st.session_state.figures.get(key)
             if fig_data and "figure" in fig_data:
-                st.plotly_chart(fig_data["figure"], use_container_width=True)
+                st.plotly_chart(fig_data["figure"], width="stretch", key=f"chart_{turn_idx}_{tc_idx}_{key}")
 
     if turn["text"]:
         st.markdown(turn["text"])

@@ -183,6 +183,7 @@ class ClaudeHandler:
         if df is None or df.empty:
             return "Query returned no rows."
         st.session_state.dataframes[dataframe_id] = df
+        st.session_state.artifact_order.append(("dataframe", dataframe_id))
         return df_summary(df)
 
     def _show_table(self, dataframe_id: str) -> str:
@@ -201,6 +202,7 @@ class ClaudeHandler:
             st.session_state.figures[key] = {"error": err}
             return f"Chart error:\n{err}"
         st.session_state.figures[key] = {"figure": fig, "code": code, "dataframe_id": dataframe_id}
+        st.session_state.artifact_order.append(("chart", key))
         return "Chart rendered."
 
     def _run_python(self, dataframe_id: str, code: str, output_id: str) -> str:
