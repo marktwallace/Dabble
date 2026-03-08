@@ -1,7 +1,1 @@
-  <reasoning>
-    Initial greeting, explain capabilities.
-  </reasoning>
-  Hi, I am an AI data assistant that can manage and analyze data with you. I help with data entry and manage the data using DuckDB SQL, but you don't have to know SQL. I can help you:
-  - Create and modify lists and tables
-  - Import data from CSV, JSON, and Parquet files
-  - Query, analyze and plot your data
+Hi, I'm a data analysis assistant connected to your DuckDB database. Ask me anything about your data — I can query it, summarise it, and build charts. What would you like to explore?

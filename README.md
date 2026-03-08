@@ -1,109 +1,73 @@
-# list-pet: A Data Analysis Assistant
+# list-pet
 
-Talk with "List Pet" using a Streamlit-based UI reminiscent of ChatGPT. Unlike most LLM chat tools, List Pet has its own SQL database and a solid understanding of Plotly charts. It can import and manipulate large datasets using a local instance of DuckDB.
+A conversational data analysis assistant. Ask questions about your data in plain English — list-pet queries DuckDB, renders Plotly charts, and builds up a knowledge base of what works in your domain.
 
-## Philosophy of Design
+Built with Claude (Anthropic) for reasoning, DuckDB for data, ChromaDB for semantic search, and Streamlit for the UI.
 
-This project provides an open-source example of a structured, agentic AI system built around real-time interaction, local data tools, and well-defined flow control. It uses Streamlit for the user interface, DuckDB for data management, and a tag-based message format to structure reasoning, SQL actions, results, and error handling.
+## Setup
 
-Messages are exchanged using a clear, inspectable format with tags like `<reasoning>`, `<sql>`, `<dataframe>`, and `<error>`, which allows both the human and the model to work with shared context and explicit actions. This structured approach makes the system easier to trace, debug, and extend.
-
-The current implementation uses OpenAI's `gpt-4o-mini` due to its low cost and high capability. This model is accessed through the standard LangChain chat interface and responds to structured prompts with tagged outputs that can be interpreted and executed by the application.
-
-In the future, we plan to migrate back to local models using Ollama once a cost-effective fine-tuning workflow is available. The system has been designed from the beginning to support that transition with minimal changes.
-
-The goal is to provide a working example that is:
-- Small enough to understand and modify
-- Clear enough to serve as a starting point for similar agents
-- Compatible with both remote and local LLMs
-
-This project may serve as a foundation for experimentation with more advanced agent behaviors, memory strategies, or fine-tuned models.
-
-## Implementation Notes
-
-The Cursor IDE was used to develop this project. Except for an initial prototype that had to be discarded, there wasn't any "vibe coding." In fact, around 1000 lines of code were written before allowing an LLM to suggest changes. Code brevity was prioritized, and LLM-generated additions are carefully reviewed.
-
-For reference, the discarded prototype ballooned to ~10,000 lines within three days and became unmaintainable. The current version is holding at around 2000 lines of Python and remains clean and manageable.
-
-The files are longer than ideal, but Cursor makes fewer mistakes with fewer, longer files.
-
-## Building and Running
-
-### Conda Setup
-
-You will need Conda. To install Conda safely on a Mac:
-
-```bash
-brew install conda
-conda init zsh
-conda config --set auto_activate_base false
-```
-
-This ensures Conda doesn’t override your system Python and only activates in virtual environments.
-
-To create a virtual environment:
-
-```bash
-conda create -p venv python=3.10
-```
-
-### The Python Project
-
-Clone the repo:
+**Prerequisites:** conda (recommended — macOS system Python is unreliable across OS upgrades)
 
 ```bash
 git clone <repo_url>
 cd list-pet
-```
-
-Create and activate the virtual environment:
-
-```bash
-conda create -p venv python=3.10
-conda activate ./venv
+conda create -n list-pet python=3.12
+conda activate list-pet
 pip install -r requirements.txt
 ```
 
-If Python packages have drifted, you may need:
+**Configure environment:**
 
 ```bash
-pip install -r requirements_version.txt
+cp .env.example .env
 ```
 
-`requirements_version.txt` was captured as of Feb 2025 using:
+Edit `.env`:
 
-```bash
-pip freeze > requirements_version.txt
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `OPENAI_API_KEY` | Yes | Used for ChromaDB embeddings (text-embedding-3-small) |
+| `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created automatically if it doesn't exist) |
+| `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory (e.g. `db/knowledge_base`) |
+| `CONVERSATIONS_DIR` | No | Where to store conversation files (default: `conversations`) |
+| `KNOWLEDGE_DIR` | No | Where to store knowledge .txt files (default: `knowledge`) |
+| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp (e.g. `SELECT max(updated_at) FROM etl_log`) |
 
-### Running the App
-
-Start Streamlit:
+## Running
 
 ```bash
 streamlit run app.py
 ```
 
-The app will create a local database at `db/list_pet.db`. You can delete or move this file to reset the database (useful for testing).
+The DuckDB file and ChromaDB directory are created automatically on first run.
 
-**TODO:** Add CLI parameter to select or override the database path.
+## Starting with an empty database
 
-Data is stored in DuckDB tables. The message history is stored in a separate `pet-meta` schema, which includes all saved conversations.
+If you don't have an existing DuckDB file, just point `DUCKDB_ANALYTIC_FILE` at a new path (e.g. `db/mydata.duckdb`). The file will be created when the app starts. Then ask list-pet to import your data:
 
-## Running unit tests
-```
-python -m src.chart_renderer
-python -m src.python_executor
-```
+> "Import data/playlist.csv"
 
----
+Claude will inspect the file, confirm the column names, and create a persistent table.
 
-### Old Ollama Pattern (currently not in use)
+## Knowledge base
 
-To run a local model (if/when re-enabled):
+The knowledge base stores domain context and successful analysis sequences for reuse across sessions.
+
+**To seed from existing `.txt` files in `knowledge/`:**
 
 ```bash
-ollama serve
-ollama run deepseek-r1:1.5b
+python -m tools.seed_knowledge_base
 ```
 
+**To clear and rebuild from scratch:**
+
+```bash
+python -m tools.rebuild_knowledge_base
+```
+
+**To add knowledge from a conversation:** type `/learn` during a session. list-pet extracts useful sequences and lets you approve each chunk before saving.
+
+## Conversation files
+
+Each conversation is saved as a plain text file in `conversations/`. These files are the complete record — SQL queries, tool results, and narrative — and are the source material for `/learn`.
