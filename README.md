@@ -33,14 +33,14 @@ Claude inspects the file, creates a persistent table, and you begin exploring im
 For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything list-pet itself does not:
 
 - `prompts/system_prompt.txt` — domain-specific instructions, schema documentation, analytical conventions. This can be large: a prompt covering a complex database with many tables, data quality quirks, and common analytical patterns might run to 20,000 tokens.
-- `knowledge/` — seed `.txt` files that prime the knowledge base before the first session, capturing domain knowledge that would otherwise take many sessions to accumulate via `/learn`.
+- `knowledge/` — seed `.txt` files that prime the knowledge base before the first session. From there, `/learn` continues to grow it over time, exactly as in bootstrap mode.
 - A DuckDB database file and a ChromaDB knowledge base directory — colocated with the overlay, not in this repository. These are binary files and are not under source control.
 
 The overlay and list-pet are wired together via `.env`. list-pet itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
 
 ## The knowledge base
 
-The `/learn` command extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search at the start of a new question. The knowledge base grows from real sessions rather than being manually authored. It's how domain knowledge (which columns are reliably populated, what NULL means in a given context, how to join these two tables correctly) accumulates over time.
+The `/learn` command extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search at the start of a new question. In overlay mode the knowledge base starts pre-seeded; in bootstrap mode it starts empty. In both cases `/learn` is how it grows over time. It's how domain knowledge (which columns are reliably populated, what NULL means in a given context, how to join these two tables correctly) accumulates over time.
 
 ## Reports
 
