@@ -16,6 +16,28 @@ The tool loop itself is about 30 lines. Send messages to Claude, execute tool ca
 
 This architecture is simple enough that it should have worked earlier. It didn't, reliably. The threshold Claude 4.x crossed isn't general capability — it's **reliable multi-step tool use with self-correction**. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results. That loop — call tool, read result as evidence, adjust — is what makes the tool feel like a real analyst rather than an unreliable script. The model quality needed to cross that bar arrived in early 2025.
 
+## How to use this tool
+
+list-pet is a framework. It ships without any domain-specific configuration — no system prompt, no database, no knowledge base. There are two ways to get started, and they can grow into each other.
+
+### Bootstrap mode
+
+Point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions. Tell list-pet to import a file:
+
+> "Import data/mydata.csv"
+
+Claude inspects the file, creates a persistent table, and you begin exploring immediately. Use `/learn` after productive conversations to save useful sequences into the knowledge base. Domain knowledge accumulates from real sessions rather than being pre-authored. This is the fastest path to value — and how the example conversations in `conversations/` were created.
+
+### Domain overlay mode
+
+For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything list-pet itself does not:
+
+- `prompts/system_prompt.txt` — domain-specific instructions, schema documentation, analytical conventions. This can be large: a prompt covering a complex database with many tables, data quality quirks, and common analytical patterns might run to 20,000 tokens.
+- `knowledge/` — seed `.txt` files that prime the knowledge base before the first session, capturing domain knowledge that would otherwise take many sessions to accumulate via `/learn`.
+- A DuckDB database file and a ChromaDB knowledge base directory — colocated with the overlay, not in this repository. These are binary files and are not under source control.
+
+The overlay and list-pet are wired together via `.env`. list-pet itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
+
 ## The knowledge base
 
 The `/learn` command extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search at the start of a new question. The knowledge base grows from real sessions rather than being manually authored. It's how domain knowledge (which columns are reliably populated, what NULL means in a given context, how to join these two tables correctly) accumulates over time.

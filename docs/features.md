@@ -6,7 +6,11 @@ A conversational data analysis tool that gives non-engineers Claude-Code-like fl
 
 The architecture is intentionally simple. Its value is in giving Claude a set of well-designed domain tools — DuckDB, pandas, Plotly — that are more focused than what general-purpose coding assistants provide. The shape of the architecture is expressed by the simplicity of the code itself. Claude is not constrained by pre-drawn boxes; it is given good tools and allowed to reason freely.
 
-**list-pet is domain-agnostic and open-source.** Domain-specific configuration (database schema documentation, system prompt, knowledge base seed content) lives in a separate overlay project. list-pet knows nothing about any particular domain.
+**list-pet is domain-agnostic and open-source.** It ships without a system prompt, database, or knowledge base. There are two usage modes:
+
+**Bootstrap mode** — point at a new DuckDB file, import a CSV, start exploring. Domain knowledge accumulates over time via `/learn`. This is the fastest path to a working session and requires no upfront configuration.
+
+**Domain overlay mode** — a separate (typically private) repository provides a system prompt, knowledge base seed content, and a pre-populated DuckDB file. The overlay is wired to list-pet via `.env`. list-pet knows nothing about any specific domain; the overlay is what makes it accurate for a given context. A production overlay system prompt may be large — covering schema documentation, data quality quirks, join patterns, and analytical conventions — and can run to tens of thousands of tokens. The DuckDB file and ChromaDB directory live with the overlay, not in this repository, and are not under source control.
 
 ---
 
@@ -60,7 +64,7 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 
 `search_knowledge_base(query)` — semantic search in ChromaDB for prior successful sequences and domain knowledge.
 
-The system prompt is loaded from `prompts/system_prompt.txt` (provided by the domain overlay project). Domain context is injected dynamically via knowledge base search, not hardcoded in the prompt.
+The system prompt is loaded from `prompts/system_prompt.txt` if provided by a domain overlay. In bootstrap mode this file may be absent or minimal. The live database schema (table names and column names) is injected dynamically at session start so Claude never needs to discover it via tool calls. Additional domain context is retrieved from the knowledge base and injected before each question is processed.
 
 ### 3. Conversation Persistence
 
@@ -99,6 +103,19 @@ Summary statistics generated automatically per column type: value counts for low
 When the summary is not sufficient, Claude uses `run_python` or `run_sql` to interrogate further — and that interrogation is also logged, preserving the reasoning trail.
 
 The file is opened at session start. The first line is the title, written by Claude on its first turn.
+
+**JSON sidecar and session resumption:**
+
+Alongside each `.txt` file, a `.json` sidecar stores the full Anthropic messages list — every user message, assistant content block, tool_use, and tool_result — as a JSON array. It is written after every agent turn and loaded when a previous conversation is opened from the entry screen.
+
+On load, two things happen:
+
+1. The messages list is restored into `st.session_state.messages`, so Claude's full context is available for the next question — no history is lost.
+2. Every `run_sql`, `run_python`, and `render_chart` call in the saved history is replayed in order, repopulating `dataframes` and `figures` in session state. This means charts and tables render correctly in the conversation view without any user action.
+
+The replay is purely mechanical — no LLM call is made. It runs the same SQL and Plotly code that is already recorded in the message history. If the underlying data has changed, the queries return updated rows; the chart code still runs against whatever data comes back.
+
+The `.txt` file remains the human-readable record and the source for `/learn`. The `.json` file is the machine-readable state; it is not intended for human reading.
 
 ### 4. /learn Command
 
@@ -229,7 +246,7 @@ ChromaDB persistent store at `db/knowledge_base/`. Embeddings via OpenAI text-em
 
 **Analytic data:** DuckDB, read-only. Path via environment variable.
 
-**Conversation files:** `conversations/` — plain text, written incrementally.
+**Conversation files:** `conversations/` — plain text (`.txt`) written incrementally; JSON sidecar (`.json`) stores the full messages list for session resumption.
 
 **Knowledge files:** `knowledge/` — plain text sequence chunks, source of truth for ChromaDB.
 

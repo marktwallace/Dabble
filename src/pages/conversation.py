@@ -41,7 +41,22 @@ def render():
 # Session state
 # ---------------------------------------------------------------------------
 
+def _replay_tool_calls(messages: list[dict], handler) -> None:
+    """Re-execute artifact-producing tool calls to restore session state on load."""
+    for msg in messages:
+        if msg["role"] != "assistant":
+            continue
+        for block in msg["content"]:
+            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart"):
+                handler._execute_tool(block["name"], block["input"])
+
+
 def _init_session():
+    if "handler" not in st.session_state:
+        prompt_path = Path(PROMPTS_DIR) / "system_prompt.txt"
+        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        st.session_state.handler = ClaudeHandler(system_prompt, KB_PATH)
+
     path = st.session_state.get("conversation_path")
     if st.session_state.get("_active_path") != path:
         st.session_state._active_path = path
@@ -49,12 +64,11 @@ def _init_session():
         st.session_state.figures = {}
         st.session_state.artifact_order = []
         st.session_state.tables_to_show = []
-        st.session_state.turns = []
-
-    if "handler" not in st.session_state:
-        prompt_path = Path(PROMPTS_DIR) / "system_prompt.txt"
-        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        st.session_state.handler = ClaudeHandler(system_prompt, KB_PATH)
+        saved = conv_file.load_messages(path) if path else []
+        st.session_state.messages = saved
+        st.session_state.turns = _messages_to_turns(saved)
+        if saved:
+            _replay_tool_calls(saved, st.session_state.handler)
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +110,7 @@ def _run_agent(text):
         conv_file.write_title(path, title)
 
     _write_new_messages(path, new_messages)
+    conv_file.save_messages(path, messages)
 
     for turn in _extract_assistant_turns(new_messages):
         st.session_state.turns.append(turn)
@@ -143,6 +158,57 @@ def _write_new_messages(path, new_messages):
 # ---------------------------------------------------------------------------
 # Turn extraction (messages → display dicts)
 # ---------------------------------------------------------------------------
+
+def _messages_to_turns(messages: list[dict]) -> list[dict]:
+    """Rebuild display turns from a full saved messages list (used on load)."""
+    turns = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg["role"] == "user":
+            content = msg["content"]
+            if isinstance(content, str):
+                turns.append({"role": "user", "text": content})
+            elif isinstance(content, list) and not any(
+                b.get("type") == "tool_result" for b in content
+            ):
+                text = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
+                if text:
+                    turns.append({"role": "user", "text": text})
+            i += 1
+        elif msg["role"] == "assistant":
+            result_map = {}
+            if (
+                i + 1 < len(messages)
+                and messages[i + 1]["role"] == "user"
+                and isinstance(messages[i + 1]["content"], list)
+            ):
+                for b in messages[i + 1]["content"]:
+                    if b.get("type") == "tool_result":
+                        result_map[b["tool_use_id"]] = b["content"]
+                i += 2
+            else:
+                i += 1
+            tool_calls = []
+            text_parts = []
+            for block in msg["content"]:
+                if block.get("type") == "text":
+                    text_parts.append(block["text"])
+                elif block.get("type") == "tool_use":
+                    tool_calls.append({
+                        "name": block["name"],
+                        "inputs": block["input"],
+                        "result": result_map.get(block["id"], ""),
+                    })
+            turns.append({
+                "role": "assistant",
+                "tool_calls": tool_calls,
+                "text": "\n".join(text_parts).strip(),
+            })
+        else:
+            i += 1
+    return turns
+
 
 def _extract_assistant_turns(new_messages):
     turns = []

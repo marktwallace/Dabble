@@ -14,7 +14,6 @@ def render():
 
     if st.button("New conversation", type="primary"):
         st.session_state.conversation_path = new_path(CONVERSATIONS_DIR)
-        st.session_state.messages = []
         st.session_state.page = "conversation"
         st.rerun()
 
@@ -31,7 +30,6 @@ def render():
         label = f"{title}  \n*{date_display}*"
         if st.button(label, key=conv["filename"], use_container_width=True):
             st.session_state.conversation_path = conv["path"]
-            st.session_state.messages = []
             st.session_state.page = "conversation"
             st.rerun()
 

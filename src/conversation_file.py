@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -67,6 +68,21 @@ def get_title(path: str) -> str:
 def read_text(path: str) -> str:
     """Return the full conversation file contents (used by /learn)."""
     return Path(path).read_text(encoding="utf-8")
+
+
+def save_messages(path: str, messages: list[dict]) -> None:
+    """Persist the full messages list as JSON alongside the .txt file."""
+    json_path = Path(path).with_suffix(".json")
+    json_path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_messages(path: str) -> list[dict]:
+    """Load messages from the JSON sidecar. Returns [] if not found."""
+    json_path = Path(path).with_suffix(".json")
+    try:
+        return json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
 
 
 def list_conversations(conversations_dir: str) -> list[dict]:
