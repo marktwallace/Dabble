@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import traceback
 from textwrap import dedent
 from typing import Optional
@@ -277,6 +278,99 @@ class ClaudeHandler:
             return response.content[0].text.strip()[:60]
         except Exception:
             return "Untitled conversation"
+
+    def generate_report(self, conversation_text: str, selected_items: list[dict]) -> dict:
+        """Generate a parameterized Streamlit report from a conversation.
+
+        selected_items: list of {"type": "chart"|"table", "id": str, "chart_code": str (charts only)}
+        Returns {"summary": {...}, "code": "..."} or {"error": "..."} on failure.
+        """
+        artifact_lines = []
+        chart_code_parts = []
+        for item in selected_items:
+            if item["type"] == "chart":
+                artifact_lines.append(f"- Chart: {item['id']}")
+                if item.get("chart_code"):
+                    chart_code_parts.append(f"# Chart: {item['id']}\n{item['chart_code']}")
+            else:
+                artifact_lines.append(f"- Table: {item['id']}")
+
+        artifact_desc = "\n".join(artifact_lines)
+        chart_code_block = "\n\n".join(chart_code_parts) or "(none)"
+
+        prompt = (
+            "You are generating a reusable parameterized Streamlit report from a data analysis conversation.\n\n"
+            f"The analyst selected these artifacts:\n{artifact_desc}\n\n"
+            "Generate a complete standalone Python file that:\n"
+            "1. Sets: DB_PATH = os.environ.get(\"DUCKDB_ANALYTIC_FILE\") and stops with st.error() if None\n"
+            "2. Uses st.sidebar widgets for parameters you identify from the conversation\n"
+            "3. Re-queries DuckDB with those parameters for each selected artifact\n"
+            "4. Reproduces selected chart code verbatim (provided below)\n\n"
+            "Guidance on parameters:\n"
+            "- Read the user's intent from the conversation, not just the SQL literals.\n"
+            "  'Show me last week' → weeks_back slider with timedelta, not a hardcoded date.\n"
+            "- If a value is a fixed analytical boundary (protocol change date, defined period), hardcode it.\n"
+            "- Date/recency parameters are the most common and most valuable to expose.\n"
+            "- If no parameters are needed, generate a simple live-query file with no widgets.\n\n"
+            "The file must be self-contained: import only os, datetime, duckdb, pandas, plotly, streamlit.\n\n"
+            "Respond using exactly this format — no markdown fences:\n\n"
+            "<summary>\n"
+            "{\n"
+            '  "title": "short report title",\n'
+            '  "parameters": [{"name": "variable_name", "description": "Human-readable label", "default": "python_expression"}],\n'
+            '  "query_count": N,\n'
+            '  "chart_count": N\n'
+            "}\n"
+            "</summary>\n\n"
+            "<code>\n"
+            "complete Python file here\n"
+            "</code>\n\n"
+            f"Chart code to reproduce verbatim:\n{chart_code_block}\n\n"
+            f"Conversation:\n{conversation_text[:15000]}"
+        )
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            summary_match = re.search(r"<summary>(.*?)</summary>", text, re.DOTALL)
+            code_match = re.search(r"<code>(.*?)</code>", text, re.DOTALL)
+            if not summary_match or not code_match:
+                return {"error": "Could not parse response — missing <summary> or <code> tags."}
+            summary = json.loads(summary_match.group(1).strip())
+            code = code_match.group(1).strip()
+            return {"summary": summary, "code": code}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def finalize_report(self, code: str, hardcoded: list[dict]) -> str:
+        """Replace selected parameter widgets with hardcoded values.
+
+        hardcoded: list of {"name": "weeks_back", "default": "1"}
+        Returns the modified code string, or the original on failure.
+        """
+        lines_desc = "\n".join(f"  {p['name']} = {p['default']}" for p in hardcoded)
+        prompt = (
+            "In the following Python code, replace these sidebar widget assignments with hardcoded values:\n"
+            f"{lines_desc}\n\n"
+            "Keep everything else exactly the same — including all imports, comments, and logic. "
+            "Return only the modified Python code, no explanation, no markdown fences.\n\n"
+            f"{code}"
+        )
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            return text
+        except Exception:
+            return code
 
     def extract_learn_chunks(self, conversation_text: str) -> list[dict]:
         """Analyse a conversation and extract knowledge chunks for /learn.

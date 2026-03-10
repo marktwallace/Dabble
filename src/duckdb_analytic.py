@@ -12,7 +12,8 @@ class DuckDBAnalytic:
         self._connect()
 
     def _connect(self):
-        self.conn = duckdb.connect(self.db_path)
+        read_only = os.environ.get("DUCKDB_READ_ONLY", "").lower() in ("1", "true", "yes")
+        self.conn = duckdb.connect(self.db_path, read_only=read_only)
         self.conn.execute("SET TimeZone = 'UTC'")
         self.cached_timestamp = self._query_timestamp()
 

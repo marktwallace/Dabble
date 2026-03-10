@@ -103,6 +103,9 @@ def _enqueue_input(text):
     if text == "/learn":
         _handle_learn()
         return
+    if text == "/snapshot":
+        _handle_snapshot()
+        return
     if text == "/report":
         _handle_report()
         return
@@ -152,7 +155,14 @@ def _handle_learn():
     st.rerun()
 
 
+def _handle_snapshot():
+    st.session_state.snapshot_show_all = False
+    st.session_state.page = "snapshot_review"
+    st.rerun()
+
+
 def _handle_report():
+    st.session_state.pop("report_draft", None)
     st.session_state.report_show_all = False
     st.session_state.page = "report_review"
     st.rerun()

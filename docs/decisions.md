@@ -4,6 +4,26 @@ Design decisions that are non-obvious, were debated, or where the wrong choice i
 
 ---
 
+## DuckDB connection mode: read-write by default, read-only via env var
+
+`DuckDBAnalytic` opens the database read-write by default. Set `DUCKDB_READ_ONLY=true` in the environment (or `.env`) to open it read-only.
+
+**Rationale:** The lightweight open-source use case is "bootstrap" — the user loads their own tables into DuckDB from within the app. That requires a read-write connection. The ELT/hot-swap case (database written by an external pipeline) uses read-only so that generated reports can open the same file concurrently. DuckDB allows multiple concurrent read-only connections but rejects any second connection when one process holds a read-write lock.
+
+The default is read-write because bootstrap is the simpler, more common starting point. ELT deployments set `DUCKDB_READ_ONLY=true` in their `.env`.
+
+---
+
+## No fallback values for configuration
+
+When a required configuration value is missing (e.g. `DUCKDB_ANALYTIC_FILE`), fail loudly rather than silently substituting a default. Generated reports use `os.environ.get("DUCKDB_ANALYTIC_FILE")` with no fallback string — if the variable is not set, the report shows a clear error and stops.
+
+Fallback values hide misconfiguration. A hardcoded path that only works on the developer's machine would let a report appear to succeed in some environments while silently using stale or wrong data in others. An explicit error forces the operator to set the variable correctly.
+
+This applies project-wide: prefer `os.environ["VAR"]` (KeyError on miss) or a guarded `os.environ.get` with an explicit error over silent defaults.
+
+---
+
 ## Knowledge base: proactive injection, not a tool
 
 An early version exposed `search_knowledge_base(query)` as a Claude tool. The idea is natural: Claude knows what the user asked, so let it decide when prior context is relevant.
@@ -85,23 +105,37 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
-## Report generation: template-based, no LLM call
+## /snapshot generation: template-based, no LLM call
 
 **Decision:** Deterministic f-string templates. Chart code is reproduced verbatim from the saved `render_chart` call. Data is embedded as a CSV string literal.
 
-**Rationale:** The chart code already exists and already worked. Re-asking the LLM to regenerate it introduces unnecessary non-determinism. The report must render identically to what the analyst saw.
+**Rationale:** The chart code already exists and already worked. Re-asking the LLM to regenerate it introduces unnecessary non-determinism. The snapshot must render identically to what the analyst saw.
+
+---
+
+## /report generation: full conversation to LLM, thin Python wrapper
+
+**Decision:** The LLM call for `/report` receives the full conversation text (user intent + SQL + results) and the verbatim chart code for selected artifacts. Claude produces the complete Streamlit Python file. Python's only job is to write it to disk.
+
+**Rejected:** Pre-processing the conversation in Python to extract SQL before handing it to Claude; hardcoded parameter detection logic in Python.
+
+**Rationale:** The user's intent lives in their natural language messages, not in the SQL literals. A user who said "show me last week" and ended up with `WHERE date >= '2026-03-02'` in the SQL wants a `timedelta` widget, not a date picker defaulting to that literal. Claude can reason about this only if it sees the full conversation. Python logic that pre-processes or second-guesses what the model receives is also fragile against future models that would make better decisions with more context — the thin wrapper approach stays correct as models improve.
+
+**Response format:** Claude returns `<summary>` and `<code>` XML tags (not JSON-wrapped code) to avoid multiline escaping issues in the JSON code field. The summary is a small JSON object containing title, parameter list, and counts — enough for the review screen preview without parsing Python.
+
+**DB_PATH:** Generated reports use `os.environ.get("DUCKDB_ANALYTIC_FILE")` with no fallback — if the variable is unset, the report shows an error and stops. See "No fallback values for configuration".
 
 ---
 
 ## Artifact ordering: explicit `artifact_order` list
 
-**Decision:** A flat `artifact_order = []` list appended in both `_run_sql` and `_render_chart`, used to drive the `/report` review screen in reverse chronological order.
+**Decision:** A flat `artifact_order = []` list appended in both `_run_sql` and `_render_chart`, used to drive the `/snapshot` and `/report` review screens in reverse chronological order.
 
 **Rejected:** Using dict insertion order from `dataframes` and `figures` separately. Cross-type chronological ordering is lost when artifacts are in separate dicts.
 
 ---
 
-## `/report` review: show 5 initially, "Show all" button
+## `/snapshot` and `/report` review: show 5 initially, "Show all" button
 
 **Decision:** Show the 5 most recent options by default; a button reveals the rest. First item pre-checked.
 

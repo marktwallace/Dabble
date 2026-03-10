@@ -33,7 +33,7 @@ def render():
             st.session_state.page = "conversation"
             st.rerun()
 
-    reports = _list_reports()
+    reports = _list_by_prefix("report")
     if reports:
         st.divider()
         st.subheader("Reports")
@@ -41,22 +41,34 @@ def render():
             with st.expander(f"{r['title']}  —  *{r['date']}*"):
                 st.code(f"streamlit run {r['path']}", language="bash")
 
+    snapshots = _list_by_prefix("snapshot")
+    if snapshots:
+        st.divider()
+        st.subheader("Snapshots")
+        for r in snapshots:
+            with st.expander(f"{r['title']}  —  *{r['date']}*"):
+                st.code(f"streamlit run {r['path']}", language="bash")
 
-def _list_reports() -> list[dict]:
+
+def _list_by_prefix(prefix: str) -> list[dict]:
     reports_dir = Path(REPORTS_DIR)
     if not reports_dir.exists():
         return []
-    files = sorted(reports_dir.glob("*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(
+        reports_dir.glob(f"{prefix}_*.py"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     result = []
     for f in files:
-        stem = f.stem  # e.g. "2026-03-08T14-30_tracks_by_length"
-        parts = stem.split("_", 1)
+        without_prefix = f.stem[len(prefix) + 1:]  # e.g. "2026-03-08T14-30_tracks_by_length"
+        parts = without_prefix.split("_", 1)
         if len(parts) == 2:
             date_display = _parse_date(parts[0] + ".txt")
             title = parts[1].replace("_", " ").title()
         else:
             date_display = ""
-            title = stem
+            title = without_prefix
         result.append({"path": str(f), "title": title, "date": date_display})
     return result
 

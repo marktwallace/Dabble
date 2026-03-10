@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from src.duckdb_analytic import DuckDBAnalytic
-from src.pages import conversation, entry, learn_review, report_review
+from src.pages import conversation, entry, learn_review, report_review, snapshot_review
 
 
 def main():
@@ -29,6 +29,8 @@ def main():
         conversation.render()
     elif page == "learn_review":
         learn_review.render()
+    elif page == "snapshot_review":
+        snapshot_review.render()
     elif page == "report_review":
         report_review.render()
     else:

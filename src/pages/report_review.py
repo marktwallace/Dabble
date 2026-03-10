@@ -4,6 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from .. import conversation_file as conv_file
+
 REPORTS_DIR = os.environ.get("REPORTS_DIR", "reports")
 INITIAL_SHOW = 5
 
@@ -12,10 +14,24 @@ def render():
     st.title("Generate report")
 
     if st.button("← Back to conversation"):
+        st.session_state.pop("report_draft", None)
         st.session_state.report_show_all = False
         st.session_state.page = "conversation"
         st.rerun()
 
+    draft = st.session_state.get("report_draft")
+
+    if draft is None:
+        _render_selection()
+    else:
+        _render_preview(draft)
+
+
+# ---------------------------------------------------------------------------
+# Selection phase
+# ---------------------------------------------------------------------------
+
+def _render_selection():
     options = _build_options()
 
     if not options:
@@ -25,7 +41,7 @@ def render():
     show_all = st.session_state.get("report_show_all", False)
     visible = options if show_all else options[:INITIAL_SHOW]
 
-    st.caption("Select one or more items to include in the report.")
+    st.caption("Select items to include in the report.")
 
     for i, (typ, k, data) in enumerate(visible):
         label = f"Chart: {k}" if typ == "chart" else f"Table: {k} ({len(data)} rows)"
@@ -49,14 +65,95 @@ def render():
         return
 
     if st.button("Generate report", type="primary"):
-        path = _generate(selected)
+        handler = st.session_state.handler
+        conversation_path = st.session_state.get("conversation_path", "")
+
+        selected_items = []
+        for typ, key, data in selected:
+            if typ == "chart":
+                selected_items.append({
+                    "type": "chart",
+                    "id": key,
+                    "chart_code": data.get("code", ""),
+                })
+            else:
+                selected_items.append({"type": "table", "id": key})
+
+        with st.spinner("Generating report..."):
+            conversation_text = conv_file.read_text(conversation_path) if conversation_path else ""
+            draft = handler.generate_report(conversation_text, selected_items)
+
+        if "error" in draft:
+            st.error(f"Generation failed: {draft['error']}")
+            return
+
+        st.session_state.report_draft = draft
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Preview phase
+# ---------------------------------------------------------------------------
+
+def _render_preview(draft):
+    summary = draft.get("summary", {})
+    code = draft.get("code", "")
+
+    st.subheader(summary.get("title", "Report"))
+
+    q_count = summary.get("query_count", 0)
+    c_count = summary.get("chart_count", 0)
+    st.caption(f"{q_count} {'query' if q_count == 1 else 'queries'} · {c_count} {'chart' if c_count == 1 else 'charts'}")
+
+    params = summary.get("parameters", [])
+    if params:
+        st.caption("Uncheck any parameter to hardcode it at its default value.")
+        for p in params:
+            default_str = p.get("default", "")
+            label = f"`{p['name']}` — {p.get('description', '')}"
+            if default_str:
+                label += f"  *(default: `{default_str}`)*"
+            st.checkbox(label, value=True, key=f"report_param_{p['name']}")
+    else:
+        st.write("No parameters — report will re-query with fixed logic.")
+
+    with st.expander("View generated code"):
+        st.code(code, language="python")
+
+    st.divider()
+
+    if st.button("Save report", type="primary"):
+        hardcoded = [
+            p for p in params
+            if not st.session_state.get(f"report_param_{p['name']}", True)
+        ]
+        final_code = code
+        if hardcoded:
+            with st.spinner("Finalizing..."):
+                final_code = st.session_state.handler.finalize_report(code, hardcoded)
+        path = _save(final_code, summary)
         st.success(f"Saved: `{path}`")
-        st.code(f"streamlit run {path}", language="bash")
+        db_path = os.environ.get("DUCKDB_ANALYTIC_FILE", "")
+        prefix = f"DUCKDB_ANALYTIC_FILE={db_path} " if db_path else ""
+        st.code(f"{prefix}streamlit run {path}", language="bash")
+
+    if st.button("Start over"):
+        st.session_state.pop("report_draft", None)
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
-# Option building
+# Helpers
 # ---------------------------------------------------------------------------
+
+def _save(code, summary):
+    Path(REPORTS_DIR).mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M")
+    title = summary.get("title", "report").lower().replace(" ", "_")[:40]
+    path = Path(REPORTS_DIR) / f"report_{timestamp}_{title}.py"
+    path.write_text(code, encoding="utf-8")
+    return str(path)
+
 
 def _build_options():
     """Return (type, key, data) tuples in reverse chronological order."""
@@ -79,128 +176,3 @@ def _build_options():
             if df is not None:
                 options.append(("table", key, df))
     return options
-
-
-# ---------------------------------------------------------------------------
-# Generation
-# ---------------------------------------------------------------------------
-
-def _generate(selected):
-    Path(REPORTS_DIR).mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M")
-    first_key = selected[0][1]
-    slug = first_key.replace(" ", "_").lower()
-    filename = f"{timestamp}_{slug}.py"
-    path = Path(REPORTS_DIR) / filename
-
-    if len(selected) == 1:
-        typ, key, data = selected[0]
-        if typ == "chart":
-            df_id = data.get("dataframe_id", key)
-            df = st.session_state.dataframes.get(df_id)
-            content = _chart_report(df, data.get("code", ""), key)
-        else:
-            content = _table_report(data, key)
-    else:
-        content = _multi_report(selected)
-
-    path.write_text(content, encoding="utf-8")
-    return str(path)
-
-
-def _title(key):
-    return key.replace("_", " ").title()
-
-
-def _chart_report(df, plotly_code, key):
-    title = _title(key)
-    csv_data = df.to_csv(index=False)
-    return f'''import io
-
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-
-st.set_page_config(page_title="{title}", layout="wide")
-st.title("{title}")
-
-DATA = """{csv_data}"""
-
-df = pd.read_csv(io.StringIO(DATA))
-
-{plotly_code}
-
-st.plotly_chart(fig, width="stretch")
-'''
-
-
-def _table_report(df, key):
-    title = _title(key)
-    csv_data = df.to_csv(index=False)
-    return f'''import io
-
-import pandas as pd
-import streamlit as st
-
-st.set_page_config(page_title="{title}", layout="wide")
-st.title("{title}")
-
-DATA = """{csv_data}"""
-
-df = pd.read_csv(io.StringIO(DATA))
-
-st.dataframe(df, width="stretch")
-'''
-
-
-def _multi_report(selected):
-    title_parts = [_title(k) for _, k, _ in selected[:2]]
-    title = " & ".join(title_parts)
-    if len(selected) > 2:
-        title += f" (+{len(selected) - 2} more)"
-
-    header = f'''import io
-
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-
-st.set_page_config(page_title="{title}", layout="wide")
-st.title("{title}")
-'''
-
-    sections = []
-    for i, (typ, key, data) in enumerate(selected):
-        section_title = _title(key)
-        if i > 0:
-            sections.append("st.divider()\n")
-
-        if typ == "chart":
-            df_id = data.get("dataframe_id", key)
-            df = st.session_state.dataframes.get(df_id)
-            csv_data = df.to_csv(index=False)
-            code = data.get("code", "")
-            sections.append(f'''st.subheader("{section_title}")
-
-DATA = """{csv_data}"""
-
-df = pd.read_csv(io.StringIO(DATA))
-
-{code}
-
-st.plotly_chart(fig, width="stretch")
-''')
-        else:
-            csv_data = data.to_csv(index=False)
-            sections.append(f'''st.subheader("{section_title}")
-
-DATA = """{csv_data}"""
-
-df = pd.read_csv(io.StringIO(DATA))
-
-st.dataframe(df, width="stretch")
-''')
-
-    return header + "\n" + "\n".join(sections)
