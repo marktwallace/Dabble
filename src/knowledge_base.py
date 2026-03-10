@@ -8,6 +8,7 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 COLLECTION_NAME = "list_pet_kb"
 CHUNK_SEPARATOR = "\n---\n"
 DESCRIPTION_PREFIX = "description: "
+DISTANCE_THRESHOLD = 1.0  # L2 distance; ~cosine similarity > 0.5 for normalised embeddings
 
 
 def _collection(db_path: str):
@@ -31,14 +32,22 @@ def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
     results = col.query(
         query_texts=[query],
         n_results=min(n_results, col.count()),
+        include=["documents", "metadatas", "distances"],
     )
     return [
         {
+            "id": chunk_id,
             "description": doc,
             "content": meta.get("full_text", doc),
             "source": meta.get("source_file", "unknown"),
         }
-        for doc, meta in zip(results["documents"][0], results["metadatas"][0])
+        for chunk_id, doc, meta, dist in zip(
+            results["ids"][0],
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        )
+        if dist < DISTANCE_THRESHOLD
     ]
 
 

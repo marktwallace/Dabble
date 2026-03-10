@@ -51,10 +51,34 @@ def _replay_tool_calls(messages: list[dict], handler) -> None:
                 handler._execute_tool(block["name"], block["input"])
 
 
+def _build_schema_context() -> str:
+    db = st.session_state.get("analytic_db")
+    if not db:
+        return ""
+    tables_df, err = db.execute_query("SHOW TABLES")
+    if err or tables_df is None or tables_df.empty:
+        return ""
+    lines = ["## Current database schema"]
+    for table in tables_df["name"]:
+        desc_df, desc_err = db.execute_query(f"DESCRIBE \"{table}\"")
+        if desc_err or desc_df is None:
+            lines.append(f"- {table}")
+        else:
+            cols = ", ".join(
+                f"{row['column_name']} ({row['column_type']})"
+                for _, row in desc_df.iterrows()
+            )
+            lines.append(f"- {table}: {cols}")
+    return "\n".join(lines)
+
+
 def _init_session():
     if "handler" not in st.session_state:
         prompt_path = Path(PROMPTS_DIR) / "system_prompt.txt"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        schema = _build_schema_context()
+        if schema:
+            system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
         st.session_state.handler = ClaudeHandler(system_prompt, KB_PATH)
 
     path = st.session_state.get("conversation_path")
@@ -100,7 +124,8 @@ def _run_agent(text):
     st.session_state.tables_to_show = []
 
     with st.spinner("working..."):
-        messages, _response = handler.run_tool_loop(st.session_state.messages)
+        kb_context = handler.get_kb_context(text)
+        messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
 
     st.session_state.messages = messages
     new_messages = messages[prev_len:]
@@ -300,6 +325,4 @@ def _expander_label(name, inputs):
         return f"Table: {df_id}{rows}"
     if name == "run_python":
         return f"Python → {inputs.get('output_dataframe_id', '')}"
-    if name == "search_knowledge_base":
-        return f"Search: {inputs.get('query', '')[:50]}"
     return name

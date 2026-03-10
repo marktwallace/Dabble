@@ -65,6 +65,7 @@ class ClaudeHandler:
     def __init__(self, system_prompt: str, kb_path: Optional[str] = None):
         self.system_prompt = system_prompt
         self.kb_path = kb_path
+        self._injected_chunk_ids: set[str] = set()
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
@@ -138,20 +139,6 @@ class ClaudeHandler:
                     "required": ["dataframe_id", "code", "output_dataframe_id"],
                 },
             },
-            {
-                "name": "search_knowledge_base",
-                "description": (
-                    "Search the knowledge base for relevant domain knowledge and prior successful analysis sequences. "
-                    "Use this when schema knowledge, domain context, or a worked example would improve accuracy."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Natural language search query."},
-                    },
-                    "required": ["query"],
-                },
-            },
         ]
 
     # --- Tool implementations ------------------------------------------------
@@ -166,8 +153,6 @@ class ClaudeHandler:
                 return self._render_chart(inputs["dataframe_id"], inputs["code"], inputs.get("chart_id"))
             elif name == "run_python":
                 return self._run_python(inputs["dataframe_id"], inputs["code"], inputs["output_dataframe_id"])
-            elif name == "search_knowledge_base":
-                return self._search_kb(inputs["query"])
             else:
                 return f"Unknown tool: {name}"
         except Exception:
@@ -220,27 +205,39 @@ class ClaudeHandler:
         except Exception:
             return traceback.format_exc()
 
-    def _search_kb(self, query: str) -> str:
+    def get_kb_context(self, query: str) -> str:
+        """Search the knowledge base and return only chunks not yet injected this session.
+
+        Deduplicates by chunk ID so the same content is never injected twice,
+        keeping the system prompt stable across turns and preserving cache hits.
+        """
         if not self.kb_path:
-            return "Knowledge base not configured."
+            return ""
         chunks = kb_search(query, self.kb_path)
-        if not chunks:
-            return "No relevant knowledge found."
-        return "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(chunks, 1))
+        new_chunks = [c for c in chunks if c["id"] not in self._injected_chunk_ids]
+        for c in new_chunks:
+            self._injected_chunk_ids.add(c["id"])
+        if not new_chunks:
+            return ""
+        return "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(new_chunks, 1))
 
     # --- Tool loop -----------------------------------------------------------
 
-    def run_tool_loop(self, messages: list[dict]) -> tuple[list[dict], object]:
+    def run_tool_loop(self, messages: list[dict], kb_context: str = "") -> tuple[list[dict], object]:
         """Run the Claude tool loop until stop_reason is not 'tool_use'.
 
         Appends all new messages (assistant turns and tool results) to the
         messages list and also returns it. The caller is responsible for
         persisting the new messages to the conversation file.
         """
+        system_text = self.system_prompt
+        if kb_context:
+            system_text = system_text + "\n\n## Relevant context from knowledge base\n" + kb_context
+        system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
         while True:
             response = self.client.messages.create(
                 model=self.model,
-                system=self.system_prompt,
+                system=system,
                 messages=messages,
                 tools=self._tools(),
                 max_tokens=8096,
