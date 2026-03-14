@@ -175,6 +175,16 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
+## Entry screen list: st.radio, not buttons
+
+**Decision:** The conversation list uses `st.radio` with `index=None` (nothing pre-selected). Clicking an item triggers `on_change` which navigates immediately.
+
+**Rejected:** Styled `st.button` per row. Full-width buttons have inherent padding and centered text that can't be reliably overridden via CSS injection — Streamlit's emotion-generated class names are unstable and `data-testid` selectors don't reliably reach the inner flex container that controls alignment.
+
+**Rationale:** `st.radio` is natively left-aligned, compact, and single-click. `index=None` ensures every click is a value change, so the first item in the list is always clickable. No CSS needed.
+
+---
+
 ## Image upload: popover above chat input, not same row
 
 **Decision:** The `st.popover("📎")` image upload button renders above `st.chat_input`, not on the same row.

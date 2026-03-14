@@ -28,11 +28,13 @@ The architecture is intentionally simple. Its value is in giving Claude a set of
 
 ### 1. Entry Screen
 
-A landing page listing previous conversations sorted by date descending, with a "New conversation" button. Each entry shows an inferred title and timestamp.
+A landing page listing previous conversations sorted by date descending, with a "New conversation" button. Each entry shows date and inferred title on one line.
 
 Conversations are plain text files in `conversations/`. No metadata database. Filenames are timestamp-based (e.g. `2026-03-07T14-32.txt`). The title shown on the entry screen is the first line of the file, written by Claude when the conversation starts.
 
-Below the conversation list, two sections: **Reports** (live, parameterized) and **Snapshots** (static), each listing generated files by date descending. Each entry is an expander showing the `streamlit run` command.
+The conversation list is rendered as `st.radio` with `index=None` (nothing pre-selected). Clicking any item navigates immediately via `on_change`. Date is shown first for scannability.
+
+Below the conversation list, two sections: **Reports** (live, parameterized) and **Snapshots** (static), each listing generated files by date descending. Each entry is a collapsed expander showing the `streamlit run` command.
 
 ### 2. Conversational Analysis
 
