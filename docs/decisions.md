@@ -175,6 +175,16 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
+## Image upload: popover above chat input, not same row
+
+**Decision:** The `st.popover("📎")` image upload button renders above `st.chat_input`, not on the same row.
+
+**Rationale:** `st.chat_input` is a fixed-position widget pinned to the bottom of the viewport that does not participate in Streamlit column layouts. Placing other widgets in `st.columns()` alongside it has no effect on `st.chat_input`'s position. True same-row placement requires CSS injection via `st.markdown("<style>...")`, which conflicts with the project's no-custom-HTML principle.
+
+In practice the positioning is fine: when conversation content fills the page the popover button naturally sits just above the chat bar. It only appears displaced when the conversation is short and content sits near the top.
+
+---
+
 ## Stay on Streamlit
 
 **Decision:** Streamlit remains the UI framework. No migration to Panel, Gradio, or a custom frontend.

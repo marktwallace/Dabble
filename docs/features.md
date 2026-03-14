@@ -40,7 +40,8 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 
 **UI layout — conversation view:**
 
-- `st.chat_input()` is the only input. It handles regular messages, /learn, /snapshot, and /report uniformly — no special buttons.
+- `st.chat_input()` is the primary input. It handles regular messages, /learn, /snapshot, and /report uniformly — no special buttons.
+- A `st.popover("📎")` button above the chat input exposes an optional image uploader. The analyst can attach a screenshot (PNG, JPG, JPEG, GIF, WebP) to any message — for example, showing Claude a Looker report and asking for a variation. The popover hides the widget until needed; once an image is attached and the message sent, the uploader resets automatically.
 - A spinner shows while the tool loop is running ("working...").
 - Each assistant turn renders as:
   1. One `st.expander` per tool call, labelled with the tool name and dataframe_id (e.g. *"SQL: abundance\_by\_type — 312 rows"*). Collapsed by default for older turns; **open by default for the most recent turn** so the analyst can immediately verify what just ran.
@@ -113,8 +114,8 @@ Alongside each `.txt` file, a `.json` sidecar stores the full Anthropic messages
 
 On load, two things happen:
 
-1. The messages list is restored into `st.session_state.messages`, so Claude's full context is available for the next question — no history is lost.
-2. Every `run_sql`, `run_python`, and `render_chart` call in the saved history is replayed in order, repopulating `dataframes` and `figures` in session state. This means charts and tables render correctly in the conversation view without any user action.
+1. The messages list is restored into `st.session_state.messages`, so Claude's full context is available for the next question — no history is lost. Image content (base64-encoded) is preserved in the JSON sidecar and restored into the display turns, so attached screenshots are visible when resuming a conversation.
+2. Every `run_sql`, `run_python`, `render_chart`, and `save_file` call in the saved history is replayed in order, repopulating `dataframes`, `figures`, and `exported_files` in session state. This means charts, tables, and download buttons render correctly in the conversation view without any user action.
 
 The replay is purely mechanical — no LLM call is made. It runs the same SQL and Plotly code that is already recorded in the message history. If the underlying data has changed, the queries return updated rows; the chart code still runs against whatever data comes back.
 

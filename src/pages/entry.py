@@ -24,21 +24,25 @@ def render():
         st.caption("No conversations yet.")
         return
 
-    for conv in conversations:
-        title = conv["title"] or conv["filename"]
-        date_display = _parse_date(conv["filename"])
-        label = f"{title}  \n*{date_display}*"
-        if st.button(label, key=conv["filename"], use_container_width=True):
-            st.session_state.conversation_path = conv["path"]
-            st.session_state.page = "conversation"
-            st.rerun()
+    labels = [
+        f"{_parse_date(c['filename'])}  —  {c['title'] or c['filename']}"
+        for c in conversations
+    ]
+    paths = [c["path"] for c in conversations]
+
+    def _open_selected():
+        idx = labels.index(st.session_state.conv_list)
+        st.session_state.conversation_path = paths[idx]
+        st.session_state.page = "conversation"
+
+    st.radio("Conversations", labels, index=None, key="conv_list", label_visibility="collapsed", on_change=_open_selected)
 
     reports = _list_by_prefix("report")
     if reports:
         st.divider()
         st.subheader("Reports")
         for r in reports:
-            with st.expander(f"{r['title']}  —  *{r['date']}*"):
+            with st.expander(f"{r['date']}  —  {r['title']}"):
                 st.code(f"streamlit run {r['path']}", language="bash")
 
     snapshots = _list_by_prefix("snapshot")
@@ -46,7 +50,7 @@ def render():
         st.divider()
         st.subheader("Snapshots")
         for r in snapshots:
-            with st.expander(f"{r['title']}  —  *{r['date']}*"):
+            with st.expander(f"{r['date']}  —  {r['title']}"):
                 st.code(f"streamlit run {r['path']}", language="bash")
 
 
