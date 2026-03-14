@@ -1,3 +1,4 @@
+import base64
 import os
 from pathlib import Path
 
@@ -22,6 +23,8 @@ def render():
     for i, turn in enumerate(turns):
         if turn["role"] == "user":
             with st.chat_message("user"):
+                for img in turn.get("images", []):
+                    st.image(base64.b64decode(img["data"]))
                 st.markdown(turn["text"])
         else:
             with st.chat_message("assistant"):
@@ -32,9 +35,27 @@ def render():
         st.session_state.pending_input = None
         st.rerun()
 
+    uploader_key = f"uploader_{st.session_state.upload_counter}"
+    with st.popover("📎"):
+        st.file_uploader(
+            "Attach image",
+            type=["png", "jpg", "jpeg", "gif", "webp"],
+            key=uploader_key,
+            label_visibility="collapsed",
+        )
     user_input = st.chat_input("Ask anything...")
     if user_input:
-        _enqueue_input(user_input.strip())
+        image_data = None
+        uploaded = st.session_state.get(uploader_key)
+        if uploaded is not None:
+            raw = uploaded.read()
+            image_data = {
+                "data": base64.b64encode(raw).decode("utf-8"),
+                "media_type": uploaded.type,
+                "name": uploaded.name,
+            }
+            st.session_state.upload_counter += 1
+        _enqueue_input(user_input.strip(), image_data)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +102,9 @@ To save a dataframe as a downloadable file, use the save_file tool.""")
 
 
 def _init_session():
+    if "upload_counter" not in st.session_state:
+        st.session_state.upload_counter = 0
+
     if "handler" not in st.session_state:
         prompt_path = Path(PROMPTS_DIR) / "system_prompt.txt"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
@@ -108,7 +132,7 @@ def _init_session():
 # Input handling
 # ---------------------------------------------------------------------------
 
-def _enqueue_input(text):
+def _enqueue_input(text, image_data=None):
     if text == "/learn":
         _handle_learn()
         return
@@ -120,9 +144,26 @@ def _enqueue_input(text):
         return
 
     path = st.session_state.conversation_path
-    st.session_state.turns.append({"role": "user", "text": text})
-    st.session_state.messages.append({"role": "user", "content": text})
-    conv_file.append_user(path, text)
+
+    if image_data:
+        image_block = {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": image_data["media_type"],
+                "data": image_data["data"],
+            },
+        }
+        api_content = [image_block, {"type": "text", "text": text}]
+        turn = {"role": "user", "text": text, "images": [image_data]}
+        conv_file.append_user(path, text, image_name=image_data["name"])
+    else:
+        api_content = text
+        turn = {"role": "user", "text": text}
+        conv_file.append_user(path, text)
+
+    st.session_state.turns.append(turn)
+    st.session_state.messages.append({"role": "user", "content": api_content})
     st.session_state.pending_input = text
     st.rerun()
 
@@ -217,8 +258,13 @@ def _messages_to_turns(messages: list[dict]) -> list[dict]:
                 b.get("type") == "tool_result" for b in content
             ):
                 text = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
-                if text:
-                    turns.append({"role": "user", "text": text})
+                images = [
+                    {"data": b["source"]["data"], "media_type": b["source"].get("media_type", "")}
+                    for b in content
+                    if b.get("type") == "image" and b.get("source", {}).get("type") == "base64"
+                ]
+                if text or images:
+                    turns.append({"role": "user", "text": text, "images": images})
             i += 1
         elif msg["role"] == "assistant":
             result_map = {}

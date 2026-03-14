@@ -15,8 +15,9 @@ def write_title(path: str, title: str) -> None:
         f.write(title + "\n")
 
 
-def append_user(path: str, text: str) -> None:
-    _append(path, f"\nUser:\n{_indent(text)}\n")
+def append_user(path: str, text: str, image_name: str | None = None) -> None:
+    prefix = f"  [image: {image_name}]\n" if image_name else ""
+    _append(path, f"\nUser:\n{prefix}{_indent(text)}\n")
 
 
 def append_assistant_turn(
