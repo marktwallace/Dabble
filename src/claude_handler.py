@@ -391,10 +391,16 @@ class ClaudeHandler:
         except Exception as e:
             return {"error": str(e)}
 
-    def generate_notebook(self, conversation_text: str) -> dict:
+    def generate_notebook(self, conversation_text: str, selected_ids: list[str] | None = None) -> dict:
         """Generate a Marimo notebook from a conversation transcript."""
+        selection_instruction = (
+            f"Only include cells for these artifact IDs: {', '.join(selected_ids)}. "
+            "Omit any queries or charts not in this list.\n"
+            if selected_ids else ""
+        )
         prompt = (
             "Generate a Marimo notebook from the list-pet conversation transcript below.\n\n"
+            f"{selection_instruction}"
             "Rules:\n"
             "- The file must start with exactly `import marimo` then `app = marimo.App(width=\"medium\")`. "
             "No other imports or code at module level. All imports (including `import marimo as mo`) go inside the first `@app.cell`.\n"
