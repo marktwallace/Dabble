@@ -2,6 +2,7 @@ import json
 import os
 import re
 import traceback
+from pathlib import Path
 from textwrap import dedent
 from typing import Optional
 
@@ -127,17 +128,39 @@ class ClaudeHandler:
             {
                 "name": "run_python",
                 "description": (
-                    "Transform a dataframe using pandas when SQL alone is insufficient. "
-                    "The input dataframe is available as 'df'. Assign the output DataFrame to 'result'."
+                    "Run Python code against a dataframe. Use for transforms, statistical analysis, "
+                    "modelling, or any computation where SQL alone is insufficient. "
+                    "The full scientific Python stack is available — import any installed package. "
+                    "The input dataframe is available as 'df'. "
+                    "If you assign a DataFrame to 'result', it is stored and summarised. "
+                    "If 'result' is any other value, it is returned as a string. "
+                    "If 'result' is not assigned, the tool returns 'Code executed successfully.'"
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "dataframe_id": {"type": "string", "description": "Input dataframe_id from a previous run_sql call."},
-                        "code": {"type": "string", "description": "Python code with df, pd, np available. Must assign a DataFrame to 'result'."},
-                        "output_dataframe_id": {"type": "string", "description": "Name for the resulting dataframe."},
+                        "code": {"type": "string", "description": "Python code with df, pd, np available. Optionally assign a DataFrame or any value to 'result'."},
+                        "output_dataframe_id": {"type": "string", "description": "Name for the resulting dataframe. Required only if result is a DataFrame."},
                     },
-                    "required": ["dataframe_id", "code", "output_dataframe_id"],
+                    "required": ["dataframe_id", "code"],
+                },
+            },
+            {
+                "name": "save_file",
+                "description": (
+                    "Save a dataframe to a file. The file is placed in the exports/ directory "
+                    "and a download button is shown to the user. "
+                    "Supported formats: csv, excel, parquet."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "dataframe_id": {"type": "string", "description": "The dataframe to save."},
+                        "filename": {"type": "string", "description": "Output filename (e.g. 'sales_summary.csv')."},
+                        "format": {"type": "string", "enum": ["csv", "excel", "parquet"], "description": "File format."},
+                    },
+                    "required": ["dataframe_id", "filename", "format"],
                 },
             },
         ]
@@ -153,7 +176,9 @@ class ClaudeHandler:
             elif name == "render_chart":
                 return self._render_chart(inputs["dataframe_id"], inputs["code"], inputs.get("chart_id"))
             elif name == "run_python":
-                return self._run_python(inputs["dataframe_id"], inputs["code"], inputs["output_dataframe_id"])
+                return self._run_python(inputs["dataframe_id"], inputs["code"], inputs.get("output_dataframe_id"))
+            elif name == "save_file":
+                return self._save_file(inputs["dataframe_id"], inputs["filename"], inputs["format"])
             else:
                 return f"Unknown tool: {name}"
         except Exception:
@@ -191,20 +216,41 @@ class ClaudeHandler:
         st.session_state.artifact_order.append(("chart", key))
         return "Chart rendered."
 
-    def _run_python(self, dataframe_id: str, code: str, output_id: str) -> str:
+    def _run_python(self, dataframe_id: str, code: str, output_id: str | None) -> str:
         df = st.session_state.dataframes.get(dataframe_id)
         if df is None:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
-        ns = {"df": df.copy(), "pd": pd, "np": np, "result": None}
+        ns = {"df": df.copy(), "pd": pd, "np": np}
         try:
             exec(dedent(code.strip()), ns)  # noqa: S102
             result = ns.get("result")
-            if not isinstance(result, pd.DataFrame):
-                return "Error: code must assign a pandas DataFrame to 'result'."
-            st.session_state.dataframes[output_id] = result
-            return df_summary(result)
+            if isinstance(result, pd.DataFrame):
+                store_id = output_id or dataframe_id
+                st.session_state.dataframes[store_id] = result
+                st.session_state.artifact_order.append(("dataframe", store_id))
+                return df_summary(result)
+            elif result is not None:
+                return str(result)
+            else:
+                return "Code executed successfully."
         except Exception:
             return traceback.format_exc()
+
+    def _save_file(self, dataframe_id: str, filename: str, fmt: str) -> str:
+        df = st.session_state.dataframes.get(dataframe_id)
+        if df is None:
+            return f"Error: '{dataframe_id}' not found. Call run_sql first."
+        exports_dir = Path("exports")
+        exports_dir.mkdir(exist_ok=True)
+        path = exports_dir / filename
+        if fmt == "csv":
+            df.to_csv(path, index=False)
+        elif fmt == "excel":
+            df.to_excel(path, index=False)
+        elif fmt == "parquet":
+            df.to_parquet(path, index=False)
+        st.session_state.exported_files[filename] = path.read_bytes()
+        return f"Saved {len(df)} rows to {path}"
 
     def get_kb_context(self, query: str) -> str:
         """Search the knowledge base and return only chunks not yet injected this session.

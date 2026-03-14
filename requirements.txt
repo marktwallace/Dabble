@@ -3,7 +3,10 @@ chromadb
 duckdb
 numpy
 openai
+openpyxl
 pandas
 plotly
 python-dotenv
+scikit-learn
+scipy
 streamlit

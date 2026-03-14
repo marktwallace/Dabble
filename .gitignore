@@ -178,5 +178,6 @@ db/
 dumps/
 logs/
 conversations/
+exports/
 knowledge/
 reports/

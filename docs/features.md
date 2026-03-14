@@ -51,10 +51,11 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 
 **In-memory environment per session:**
 - One DuckDB connection (read-only, path from environment config)
-- `dataframes` dict — named DataFrames produced by run_sql
+- `dataframes` dict — named DataFrames produced by run_sql or run_python
 - `figures` dict — named Plotly figures produced by render_chart
+- `exported_files` dict — file bytes keyed by filename, produced by save_file
 
-**Four tools:**
+**Five tools:**
 
 `run_sql(sql, dataframe_id)` — execute DuckDB SQL, store full DataFrame in session memory, return schema + sample to Claude for reasoning.
 
@@ -62,9 +63,11 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 
 `render_chart(dataframe_id, plotly_code, chart_id)` — render a Plotly figure using the full in-memory DataFrame. Claude can iterate on a chart without re-querying. The human reads the chart visually.
 
-`run_python(dataframe_id, code, output_dataframe_id)` — pandas transform when SQL alone is insufficient.
+`run_python(dataframe_id, code, output_dataframe_id?)` — run Python against a dataframe for transforms, statistical analysis, modelling, or any computation where SQL alone is insufficient. The full scientific Python stack is available. If `result` is assigned a DataFrame it is stored; if it is any other value it is returned as a string; if unassigned, returns "Code executed successfully."
 
-The system prompt is loaded from `prompts/system_prompt.txt` if provided by a domain overlay. In bootstrap mode this file may be absent or minimal. The live database schema (table names and column names) is injected dynamically at session start so Claude never needs to discover it via tool calls. Additional domain context is retrieved from the knowledge base and injected before each question is processed.
+`save_file(dataframe_id, filename, format)` — save a dataframe to `exports/` as CSV, Excel, or Parquet and render a download button in the conversation. Covers the "email me this data" workflow that a Jupyter user handles with `df.to_csv()`.
+
+The system prompt is loaded from `prompts/system_prompt.txt` if provided by a domain overlay. In bootstrap mode this file may be absent or minimal. The live database schema (table names and column names) is injected dynamically at session start so Claude never needs to discover it via tool calls. A static block documenting the exec namespace available inside `run_python` and `render_chart` (available variables, importable packages) is also injected at session start. Additional domain context is retrieved from the knowledge base and injected before each question is processed.
 
 ### 3. Conversation Persistence
 

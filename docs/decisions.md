@@ -140,3 +140,47 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 **Decision:** Show the 5 most recent options by default; a button reveals the rest. First item pre-checked.
 
 **Rationale:** Long sessions accumulate many artifacts; the analyst almost always wants something recent. Avoids overwhelming the screen.
+
+---
+
+## `run_python`: general computation, not pandas transform
+
+**Decision:** `run_python` is framed as "run Python with full scientific stack access" rather than "pandas transform." `output_dataframe_id` is optional. If `result` is a DataFrame it is stored; any other value is returned as a string; no assignment returns "Code executed successfully."
+
+**Rationale:** The tool description shapes how Claude uses it. A description that says "pandas transform" causes Claude to think only in terms of DataFrame-in/DataFrame-out. Broadening the framing — and relaxing the `result` contract — lets Claude compute scalars, run statistical tests, and fit models without being forced to wrap everything in a one-row DataFrame. The exec namespace (`df`, `pd`, `np`) is unchanged; Claude can `import` anything installed.
+
+---
+
+## `save_file` tool: downloadable file exports
+
+**Decision:** A `save_file(dataframe_id, filename, format)` tool writes to `exports/` and renders a `st.download_button` in the conversation. Supported formats: CSV, Excel, Parquet.
+
+**Rationale:** Covers the "email me this data" workflow that a Jupyter user handles with `df.to_csv()`. Without it, there is no way to produce a downloadable artifact mid-conversation. The tool is narrow by design — it does not write arbitrary files, only dataframes in one of three formats. `exports/` is gitignored. On conversation reload, `save_file` is included in the replay list so download buttons survive session resumption.
+
+---
+
+## No `render_html` tool
+
+**Decision:** Do not add a general HTML rendering tool.
+
+**Rationale:** The structured-output property of the current tools — Plotly figures reproducible from code, dataframes embeddable as CSV — is what makes `/snapshot` and `/report` work. An HTML blob is opaque: it cannot be reproduced from code or embedded as data. Claude will gravitate toward the most expressive tool available; if `render_html` exists it will use it for cases where `render_chart` would have been better, and those outputs will not be reproducible in generated reports. If a specific visualisation need arises that Plotly genuinely cannot handle, solve it then as a narrowly scoped tool for that case.
+
+---
+
+## Exec namespace: static string in system prompt, not a tool
+
+**Decision:** The variables and packages available inside `run_python` and `render_chart` are documented as a static string block injected into the system prompt at session start, not exposed via an "inspect environment" tool.
+
+**Rationale:** What Claude needs is not the Python source of the tool wrappers — it needs to know what names are in scope inside each `exec`. That is a documentation problem, not a tooling problem. A static string is cheaper than a tool call, more reliable than Claude inferring namespace contents from source code, and does not consume a turn before analysis begins. The installed package list changes rarely; a static list updated when `requirements.txt` changes is more reliable than dynamic `pip list` introspection.
+
+---
+
+## Stay on Streamlit
+
+**Decision:** Streamlit remains the UI framework. No migration to Panel, Gradio, or a custom frontend.
+
+**Rationale:** Streamlit provides a chat UI, rich interactive output primitives (`st.dataframe`, `st.plotly_chart`), and generated reports that are readable Python deployable with one command. The constraints it imposes — synchronous reruns, linear layout, no persistent client state — are not currently blocking real analytical workflows.
+
+Revisit if either of these become genuine pain points:
+- Long conversations where the analyst needs to reference an earlier chart while asking a new question (pinning / side-by-side layout).
+- Tool loops longer than ~20 seconds where streaming would meaningfully improve the experience.

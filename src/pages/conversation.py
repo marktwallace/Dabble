@@ -47,7 +47,7 @@ def _replay_tool_calls(messages: list[dict], handler) -> None:
         if msg["role"] != "assistant":
             continue
         for block in msg["content"]:
-            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart"):
+            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart", "save_file"):
                 handler._execute_tool(block["name"], block["input"])
 
 
@@ -69,6 +69,14 @@ def _build_schema_context() -> str:
                 for _, row in desc_df.iterrows()
             )
             lines.append(f"- {table}: {cols}")
+    lines.append("""
+## Tool execution environment
+
+render_chart namespace: df (the dataframe), go (plotly.graph_objects), px (plotly.express), pd (pandas), np (numpy). Must assign a go.Figure to 'fig'.
+
+run_python namespace: df (the input dataframe), pd (pandas), np (numpy). You can import any installed package. Installed packages: anthropic, chromadb, duckdb, numpy, openai, openpyxl, pandas, plotly, scikit-learn, scipy, streamlit.
+
+To save a dataframe as a downloadable file, use the save_file tool.""")
     return "\n".join(lines)
 
 
@@ -88,6 +96,7 @@ def _init_session():
         st.session_state.figures = {}
         st.session_state.artifact_order = []
         st.session_state.tables_to_show = []
+        st.session_state.exported_files = {}
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
@@ -316,6 +325,15 @@ def _render_assistant_turn(turn, turn_idx, is_latest):
             if fig_data and "figure" in fig_data:
                 st.plotly_chart(fig_data["figure"], width="stretch", key=f"chart_{turn_idx}_{tc_idx}_{key}")
 
+    for tc_idx, tc in enumerate(turn["tool_calls"]):
+        if tc["name"] == "save_file":
+            filename = tc["inputs"].get("filename", "")
+            fmt = tc["inputs"].get("format", "")
+            data = st.session_state.exported_files.get(filename)
+            if data is not None:
+                mime = {"csv": "text/csv", "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "parquet": "application/octet-stream"}.get(fmt, "application/octet-stream")
+                st.download_button(f"Download {filename}", data=data, file_name=filename, mime=mime, key=f"dl_{turn_idx}_{tc_idx}_{filename}")
+
     if turn["text"]:
         st.markdown(turn["text"])
 
@@ -335,4 +353,6 @@ def _expander_label(name, inputs):
         return f"Table: {df_id}{rows}"
     if name == "run_python":
         return f"Python → {inputs.get('output_dataframe_id', '')}"
+    if name == "save_file":
+        return f"Save: {inputs.get('filename', '')}"
     return name
