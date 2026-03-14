@@ -391,6 +391,46 @@ class ClaudeHandler:
         except Exception as e:
             return {"error": str(e)}
 
+    def generate_notebook(self, conversation_text: str) -> dict:
+        """Generate a Marimo notebook from a conversation transcript."""
+        prompt = (
+            "Generate a Marimo notebook from the list-pet conversation transcript below.\n\n"
+            "Rules:\n"
+            "- The file must start with exactly `import marimo` then `app = marimo.App(width=\"medium\")`. "
+            "No other imports or code at module level. All imports (including `import marimo as mo`) go inside the first `@app.cell`.\n"
+            "- Use the final successful version of each query (ignore any with SQL errors); "
+            "if the conversation corrects a calculation mid-session (e.g. a wrong unit), apply the corrected formula\n"
+            "- The last un-assigned expression in a cell is what gets displayed (like Jupyter). "
+            "The return tuple is only for exporting variables to downstream cells. These are separate.\n"
+            "- To display a DataFrame: make it the last expression before `return`\n"
+            "- To display a chart: `mo.ui.plotly(fig)` as the last expression before `return`\n"
+            "- A query whose result is needed by a chart cell must `return (df,)` so the chart cell can declare it as an argument\n"
+            "- DB_PATH must use `os.environ.get(\"DUCKDB_ANALYTIC_FILE\")` — never hardcode a path\n"
+            "- Close with the assistant's narrative summary as a `mo.md(...)` cell\n\n"
+            "Respond using exactly this format — no markdown fences:\n\n"
+            "<title>short notebook title</title>\n\n"
+            "<code>\n"
+            "complete Python file here\n"
+            "</code>\n\n"
+            f"Conversation:\n{conversation_text}"
+        )
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            title_match = re.search(r"<title>(.*?)</title>", text, re.DOTALL)
+            code_match = re.search(r"<code>(.*?)</code>", text, re.DOTALL)
+            if not code_match:
+                return {"error": "Could not parse response — missing <code> tags."}
+            title = title_match.group(1).strip() if title_match else "Notebook"
+            code = code_match.group(1).strip()
+            return {"title": title, "code": code}
+        except Exception as e:
+            return {"error": str(e)}
+
     def finalize_report(self, code: str, hardcoded: list[dict]) -> str:
         """Replace selected parameter widgets with hardcoded values.
 

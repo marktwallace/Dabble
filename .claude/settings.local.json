@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show:*)",
+      "Bash(python -c \"import duckdb; print\\(duckdb.__version__\\)\")",
+      "Bash(find /Users/mark.wallace/mtw/list-pet -name *.db)"
+    ]
+  }
+}

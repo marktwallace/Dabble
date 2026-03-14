@@ -142,6 +142,9 @@ def _enqueue_input(text, image_data=None):
     if text == "/report":
         _handle_report()
         return
+    if text == "/notebook":
+        _handle_notebook()
+        return
 
     path = st.session_state.conversation_path
 
@@ -215,6 +218,12 @@ def _handle_report():
     st.session_state.pop("report_draft", None)
     st.session_state.report_show_all = False
     st.session_state.page = "report_review"
+    st.rerun()
+
+
+def _handle_notebook():
+    st.session_state.pop("notebook_draft", None)
+    st.session_state.page = "notebook_review"
     st.rerun()
 
 

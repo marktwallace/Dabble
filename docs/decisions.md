@@ -113,6 +113,16 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
+## Generated file DB_PATH: environment variable, not hardcoded path
+
+**Decision:** Generated reports and notebooks read the database path from `os.environ.get("DUCKDB_ANALYTIC_FILE")` at runtime. They do not embed the path at generation time.
+
+**Rationale:** Generated files are run on a different machine from where they were created. A path hardcoded at generation time (e.g. `/Users/mark.wallace/...`) is guaranteed to be wrong on any other system. The environment variable must be set wherever the file is run — reports with `DUCKDB_ANALYTIC_FILE=... streamlit run`, notebooks with `DUCKDB_ANALYTIC_FILE=... marimo edit`.
+
+**How to apply:** Any LLM generation prompt that produces file code must instruct Claude to use `os.environ.get("DUCKDB_ANALYTIC_FILE")`, not a path placeholder. The review screen shows the correct startup command after saving, so the analyst knows what to set.
+
+---
+
 ## /report generation: full conversation to LLM, thin Python wrapper
 
 **Decision:** The LLM call for `/report` receives the full conversation text (user intent + SQL + results) and the verbatim chart code for selected artifacts. Claude produces the complete Streamlit Python file. Python's only job is to write it to disk.

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from src.duckdb_analytic import DuckDBAnalytic
-from src.pages import conversation, entry, learn_review, report_review, snapshot_review
+from src.pages import conversation, entry, learn_review, notebook_review, report_review, snapshot_review
 
 
 def main():
@@ -33,6 +33,8 @@ def main():
         snapshot_review.render()
     elif page == "report_review":
         report_review.render()
+    elif page == "notebook_review":
+        notebook_review.render()
     else:
         st.session_state.page = "entry"
         st.rerun()
