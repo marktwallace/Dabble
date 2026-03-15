@@ -10,7 +10,7 @@ REPORTS_DIR = os.environ.get("REPORTS_DIR", "reports")
 
 
 def render():
-    st.title("list-pet")
+    st.title("Dabble")
 
     if st.button("New conversation", type="primary"):
         st.session_state.conversation_path = new_path(CONVERSATIONS_DIR)

@@ -1,4 +1,4 @@
-# list-pet v2 Requirements
+# Dabble v2 Requirements
 
 ## Vision
 
@@ -6,11 +6,11 @@ A conversational data analysis tool that gives non-engineers Claude-Code-like fl
 
 The architecture is intentionally simple. Its value is in giving Claude a set of well-designed domain tools — DuckDB, pandas, Plotly — that are more focused than what general-purpose coding assistants provide. The shape of the architecture is expressed by the simplicity of the code itself. Claude is not constrained by pre-drawn boxes; it is given good tools and allowed to reason freely.
 
-**list-pet is domain-agnostic and open-source.** It ships without a system prompt, database, or knowledge base. There are two usage modes:
+**Dabble is domain-agnostic and open-source.** It ships without a system prompt, database, or knowledge base. There are two usage modes:
 
 **Bootstrap mode** — point at a new DuckDB file, import a CSV, start exploring. Domain knowledge accumulates over time via `/learn`. This is the fastest path to a working session and requires no upfront configuration.
 
-**Domain overlay mode** — a separate (typically private) repository provides a system prompt, knowledge base seed content, and a pre-populated DuckDB file. The overlay is wired to list-pet via `.env`. list-pet knows nothing about any specific domain; the overlay is what makes it accurate for a given context. A production overlay system prompt may be large — covering schema documentation, data quality quirks, join patterns, and analytical conventions — and can run to tens of thousands of tokens. The DuckDB file and ChromaDB directory live with the overlay, not in this repository, and are not under source control.
+**Domain overlay mode** — a separate (typically private) repository provides a system prompt, knowledge base seed content, and a pre-populated DuckDB file. The overlay is wired to Dabble via `.env`. Dabble knows nothing about any specific domain; the overlay is what makes it accurate for a given context. A production overlay system prompt may be large — covering schema documentation, data quality quirks, join patterns, and analytical conventions — and can run to tens of thousands of tokens. The DuckDB file and ChromaDB directory live with the overlay, not in this repository, and are not under source control.
 
 ---
 
@@ -43,7 +43,7 @@ A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs s
 **UI layout — conversation view:**
 
 - `st.chat_input()` is the primary input. It handles regular messages, /learn, /snapshot, and /report uniformly — no special buttons.
-- A `st.popover("📎")` button above the chat input exposes an optional image uploader. The analyst can attach a screenshot (PNG, JPG, JPEG, GIF, WebP) to any message — for example, showing Claude a Looker report and asking for a variation. The popover hides the widget until needed; once an image is attached and the message sent, the uploader resets automatically.
+- A `st.popover("📎")` button above the chat input exposes an optional file uploader. The analyst can attach either an image (PNG, JPG, JPEG, GIF, WebP) or any text/data file (CSV, TSV, Markdown, SQL, Python, JSON, JSONL, plain text, etc.) to any message. The popover hides the widget until needed; once a file is attached and the message sent, the uploader resets automatically.
 - A spinner shows while the tool loop is running ("working...").
 - Each assistant turn renders as:
   1. One `st.expander` per tool call, labelled with the tool name and dataframe_id (e.g. *"SQL: abundance\_by\_type — 312 rows"*). Collapsed by default for older turns; **open by default for the most recent turn** so the analyst can immediately verify what just ran.
@@ -116,7 +116,7 @@ Alongside each `.txt` file, a `.json` sidecar stores the full Anthropic messages
 
 On load, two things happen:
 
-1. The messages list is restored into `st.session_state.messages`, so Claude's full context is available for the next question — no history is lost. Image content (base64-encoded) is preserved in the JSON sidecar and restored into the display turns, so attached screenshots are visible when resuming a conversation.
+1. The messages list are restored into `st.session_state.messages`, so Claude's full context is available for the next question — no history is lost. Attached image content blocks are stored in the JSON as `{"type": "omitted"}` — the base64 payload is not preserved. The primary purpose of the JSON sidecar is to recover charts and analytical state; re-displaying user-uploaded screenshots on resume is not a goal.
 2. Every `run_sql`, `run_python`, `render_chart`, and `save_file` call in the saved history is replayed in order, repopulating `dataframes`, `figures`, and `exported_files` in session state. This means charts, tables, and download buttons render correctly in the conversation view without any user action.
 
 The replay is purely mechanical — no LLM call is made. It runs the same SQL and Plotly code that is already recorded in the message history. If the underlying data has changed, the queries return updated rows; the chart code still runs against whatever data comes back.
@@ -131,6 +131,12 @@ The knowledge base grows from real analysis sessions. When the analyst types `/l
 2. Each chunk is listed with a short description and its full content
 3. The analyst approves or rejects each chunk individually
 4. Confirmed chunks are saved as a file in `knowledge/` and immediately loaded into ChromaDB
+
+**Two extraction paths:**
+
+When `/learn` is triggered immediately after a file was attached (with no other turns between them), the command takes a *document chunking* path: the file content is split structurally (on Markdown headers, blank lines, or fixed-size windows) into segments, each segment is passed to Claude to produce a description + content chunk, and the results go to the review screen. This path is appropriate when the user's intent is clearly "index this document."
+
+When `/learn` is triggered after a normal conversation (possibly one that included a file earlier), the command takes the *conversation extraction* path: Claude reads the full `.txt` conversation transcript and extracts analytical episodes as sequence chunks. Because file content is written in full to the `.txt` file at send time, it is naturally available to the extraction call — no special handling is needed.
 
 **What a sequence chunk contains:**
 
@@ -192,7 +198,7 @@ The snapshot title is derived from the first two selected item names (e.g. "Trac
 
 **File naming:** `reports/snapshot_<timestamp>_<first_item_id>.py`.
 
-**No list-pet dependency.** Generated files import only: `streamlit`, `pandas`, `plotly`. The analyst runs them with `streamlit run reports/<filename>.py`.
+**No Dabble dependency.** Generated files import only: `streamlit`, `pandas`, `plotly`. The analyst runs them with `streamlit run reports/<filename>.py`.
 
 **Template location:** The snapshot file templates are f-strings in `src/pages/snapshot_review.py`. Generation is deterministic — no LLM call is needed.
 
@@ -277,6 +283,8 @@ ChromaDB persistent store at `db/knowledge_base/`. Embeddings via OpenAI text-em
 **Analytic data:** DuckDB, read-only. Path via environment variable.
 
 **Conversation files:** `conversations/` — plain text (`.txt`) written incrementally; JSON sidecar (`.json`) stores the full messages list for session resumption.
+
+**Uploaded files:** `uploads/` — non-image files attached via the popover are saved here at send time. Filenames are prefixed with the conversation timestamp to avoid collisions. The directory is gitignored and treated as ephemeral (a scratchpad); it is not part of the recoverable conversation state.
 
 **Knowledge files:** `knowledge/` — plain text sequence chunks, source of truth for ChromaDB.
 

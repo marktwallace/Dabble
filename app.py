@@ -10,7 +10,7 @@ from src.pages import conversation, entry, learn_review, notebook_review, report
 
 
 def main():
-    st.set_page_config(page_title="list-pet", layout="wide")
+    st.set_page_config(page_title="Dabble", layout="wide")
 
     if "analytic_db" not in st.session_state:
         db_path = os.environ.get("DUCKDB_ANALYTIC_FILE")

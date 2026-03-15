@@ -5,7 +5,7 @@ from pathlib import Path
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
-COLLECTION_NAME = "list_pet_kb"
+COLLECTION_NAME = "dabble_kb"
 CHUNK_SEPARATOR = "\n---\n"
 DESCRIPTION_PREFIX = "description: "
 DISTANCE_THRESHOLD = 1.0  # L2 distance; ~cosine similarity > 0.5 for normalised embeddings

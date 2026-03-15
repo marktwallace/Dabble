@@ -195,13 +195,33 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
-## Image upload: popover above chat input, not same row
+## File upload: popover above chat input, not same row
 
-**Decision:** The `st.popover("📎")` image upload button renders above `st.chat_input`, not on the same row.
+**Decision:** The `st.popover("📎")` file upload button renders above `st.chat_input`, not on the same row.
 
 **Rationale:** `st.chat_input` is a fixed-position widget pinned to the bottom of the viewport that does not participate in Streamlit column layouts. Placing other widgets in `st.columns()` alongside it has no effect on `st.chat_input`'s position. True same-row placement requires CSS injection via `st.markdown("<style>...")`, which conflicts with the project's no-custom-HTML principle.
 
 In practice the positioning is fine: when conversation content fills the page the popover button naturally sits just above the chat bar. It only appears displaced when the conversation is short and content sits near the top.
+
+---
+
+## Non-image file upload: save to disk, send path + preview
+
+**Decision:** When a non-image file is attached, it is saved to `uploads/` and Claude receives: the file path, the line count, and a content preview. If the file is ≤200 lines **and** ≤8 KB, the full content is sent inline. Otherwise Claude gets the first 10 lines and last 5 lines with the omission count. Binary files (Parquet, Excel) get path + file size only, no text preview.
+
+**Rejected:** Sending full content regardless of size (would flood context for large files); asking the user to declare intent upfront as "text context" vs. "queryable data" (unnecessary friction).
+
+**Rationale:** Claude already knows whether a file is a spec document or a data table from the filename, extension, and preview. Sending the path lets it query the file with DuckDB or `pd.read_csv()` if appropriate; sending the preview lets it reason about structure without an extra tool call. The user never has to think about it.
+
+UTF-16 encoded files (e.g. Apple Music exports) are decoded after a UTF-8 attempt fails, then treated as text. Files that cannot be decoded as text are treated as binary.
+
+---
+
+## Image base64 not stored in JSON sidecar
+
+**Decision:** When writing the JSON sidecar, image content blocks are replaced with `{"type": "omitted"}`. The base64 payload is discarded.
+
+**Rationale:** The JSON sidecar exists to recover analytical state — charts, tables, and Claude's full message context for resumption. User-uploaded images do not need to be recoverable: they are large (significantly inflating the JSON file), and the analyst already has the original image. Omitting the base64 keeps the sidecar lean without losing anything meaningful.
 
 ---
 

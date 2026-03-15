@@ -399,7 +399,7 @@ class ClaudeHandler:
             if selected_ids else ""
         )
         prompt = (
-            "Generate a Marimo notebook from the list-pet conversation transcript below.\n\n"
+            "Generate a Marimo notebook from the Dabble conversation transcript below.\n\n"
             f"{selection_instruction}"
             "Rules:\n"
             "- The file must start with exactly `import marimo` then `app = marimo.App(width=\"medium\")`. "

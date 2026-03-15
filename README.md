@@ -1,4 +1,4 @@
-# list-pet
+# Dabble
 
 A conversational data analysis tool built on Claude's native tool loop. You ask questions in plain English; it queries DuckDB, renders Plotly charts, and produces standalone Streamlit reports to share with colleagues.
 
@@ -18,11 +18,11 @@ This architecture is simple enough that it should have worked earlier. It didn't
 
 ## How to use this tool
 
-list-pet is a framework. It ships without any domain-specific configuration — no system prompt, no database, no knowledge base. There are two ways to get started, and they can grow into each other.
+Dabble is a framework. It ships without any domain-specific configuration — no system prompt, no database, no knowledge base. There are two ways to get started, and they can grow into each other.
 
 ### Bootstrap mode
 
-Point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions. Tell list-pet to import a file:
+Point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions. Tell Dabble to import a file:
 
 > "Import data/mydata.csv"
 
@@ -30,13 +30,13 @@ Claude inspects the file, creates a persistent table, and you begin exploring im
 
 ### Domain overlay mode
 
-For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything list-pet itself does not:
+For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything Dabble itself does not:
 
 - `prompts/system_prompt.txt` — domain-specific instructions, schema documentation, analytical conventions. This can be large: a prompt covering a complex database with many tables, data quality quirks, and common analytical patterns might run to 20,000 tokens.
 - `knowledge/` — seed `.txt` files that prime the knowledge base before the first session. From there, `/learn` continues to grow it over time, exactly as in bootstrap mode.
 - A DuckDB database file and a ChromaDB knowledge base directory — colocated with the overlay, not in this repository. These are binary files and are not under source control.
 
-The overlay and list-pet are wired together via `.env`. list-pet itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
+The overlay and Dabble are wired together via `.env`. Dabble itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
 
 ## The knowledge base
 
@@ -44,7 +44,7 @@ The `/learn` command extracts analytical sequences from a conversation — the S
 
 ## Reports
 
-`/report` generates a standalone Streamlit `.py` file: the chart's dataframe is embedded as a CSV literal, and the Plotly code Claude produced is reproduced verbatim. No list-pet dependency. The analyst runs `streamlit run reports/<file>.py` and gets the exact same chart they saw in the conversation.
+`/report` generates a standalone Streamlit `.py` file: the chart's dataframe is embedded as a CSV literal, and the Plotly code Claude produced is reproduced verbatim. No Dabble dependency. The analyst runs `streamlit run reports/<file>.py` and gets the exact same chart they saw in the conversation.
 
 ---
 
@@ -54,9 +54,9 @@ The `/learn` command extracts analytical sequences from a conversation — the S
 
 ```bash
 git clone <repo_url>
-cd list-pet
-conda create -n list-pet python=3.12
-conda activate list-pet
+cd Dabble
+conda create -n dabble python=3.12
+conda activate dabble
 pip install -r requirements.txt
 ```
 
@@ -88,7 +88,7 @@ The DuckDB file and ChromaDB directory are created automatically on first run.
 
 ## Starting with an empty database
 
-Point `DUCKDB_ANALYTIC_FILE` at a new path (e.g. `db/mydata.duckdb`). The file will be created when the app starts. Then ask list-pet to import your data:
+Point `DUCKDB_ANALYTIC_FILE` at a new path (e.g. `db/mydata.duckdb`). The file will be created when the app starts. Then ask Dabble to import your data:
 
 > "Import data/playlist.csv"
 
@@ -108,7 +108,7 @@ python -m tools.seed_knowledge_base
 python -m tools.rebuild_knowledge_base
 ```
 
-**To add knowledge from a conversation:** type `/learn` during a session. list-pet extracts useful sequences and lets you approve each chunk before saving.
+**To add knowledge from a conversation:** type `/learn` during a session. Dabble extracts useful sequences and lets you approve each chunk before saving.
 
 ## Conversation files
 
