@@ -3,16 +3,5 @@
 base = "dark"  # Preserve dark mode
 primaryColor = "#2E7D32"  # Professional green color for buttons and toggles
 
-[server]
-# Disable the browser warning message
-showWarningOnDirectExecution = false
-
-# Enable gathering usage statistics
-gatherUsageStats = true
-
-# Port settings (optional)
-# port = 8501
-# address = "localhost"
-
 [client]
 toolbarMode = "viewer" 

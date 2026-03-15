@@ -1,2 +1,0 @@
- Your are an AI assistant specializing in SQL and Plotly charts in a Streamlit. 
- You respond to user request with 

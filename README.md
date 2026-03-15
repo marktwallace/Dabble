@@ -1,109 +1,115 @@
-# list-pet: A Data Analysis Assistant
+# Dabble
 
-Talk with "List Pet" using a Streamlit-based UI reminiscent of ChatGPT. Unlike most LLM chat tools, List Pet has its own SQL database and a solid understanding of Plotly charts. It can import and manipulate large datasets using a local instance of DuckDB.
+A conversational data analysis tool built on Claude's native tool loop. You ask questions in plain English; it queries DuckDB, renders Plotly charts, and produces standalone Streamlit reports to share with colleagues.
 
-## Philosophy of Design
+The core idea is simple: give Claude a small set of tools — query DuckDB, transform with pandas, render a Plotly chart, search a knowledge base — and let it reason freely within them. No agent framework. No pre-drawn analysis steps. Five tools that form a complete analytical loop, run synchronously until Claude has something worth showing. The architecture fits in a short code review; if a file gets long, the design is probably wrong.
 
-This project provides an open-source example of a structured, agentic AI system built around real-time interaction, local data tools, and well-defined flow control. It uses Streamlit for the user interface, DuckDB for data management, and a tag-based message format to structure reasoning, SQL actions, results, and error handling.
+DuckDB is not an incidental choice. It is fast, embedded, and SQL-native — Claude can query CSV files, Parquet, or a persistent database file with nothing between it and the data. No connection pool, no server to restart, no ORM. The query-result-iterate loop runs in milliseconds, which is what makes conversational analysis feel responsive rather than tedious, and what separates this from tools that treat the database as a distant service.
 
-Messages are exchanged using a clear, inspectable format with tags like `<reasoning>`, `<sql>`, `<dataframe>`, and `<error>`, which allows both the human and the model to work with shared context and explicit actions. This structured approach makes the system easier to trace, debug, and extend.
+## Why this works differently from a general-purpose coding assistant
 
-The current implementation uses OpenAI's `gpt-4o-mini` due to its low cost and high capability. This model is accessed through the standard LangChain chat interface and responds to structured prompts with tagged outputs that can be interpreted and executed by the application.
+The tool surface is small and deliberately domain-specific: five tools — `run_sql`, `show_table`, `render_chart`, `run_python`, `search_knowledge_base` — that form a complete analytical loop. None of them is interesting in isolation. Together they cover the full cycle: query data, display it, visualize it, iterate on a chart without re-querying, apply a pandas transform when SQL isn't enough, and retrieve prior domain context. The constraint matters: Claude isn't writing arbitrary code, it's operating a coherent set of instruments.
 
-In the future, we plan to migrate back to local models using Ollama once a cost-effective fine-tuning workflow is available. The system has been designed from the beginning to support that transition with minimal changes.
+The tool loop itself is about 30 lines. Send messages to Claude, execute tool calls locally when Claude requests them, append results, repeat until Claude stops. No agent framework, no queuing machinery, no intermediate state flags. It runs synchronously as a single Streamlit render pass. Anthropic's prompt caching makes multi-step loops fast — the stable context (system prompt, earlier turns) is cached server-side, so each iteration only re-evaluates new tool results.
 
-The goal is to provide a working example that is:
-- Small enough to understand and modify
-- Clear enough to serve as a starting point for similar agents
-- Compatible with both remote and local LLMs
+## Why now and not 18 months ago
 
-This project may serve as a foundation for experimentation with more advanced agent behaviors, memory strategies, or fine-tuned models.
+This architecture is simple enough that it should have worked earlier. It didn't, reliably. The threshold Claude 4.x crossed isn't general capability — it's **reliable multi-step tool use with self-correction**. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results. That loop — call tool, read result as evidence, adjust — is what makes the tool feel like a real analyst rather than an unreliable script. The model quality needed to cross that bar arrived in early 2025.
 
-## Implementation Notes
+## How to use this tool
 
-The Cursor IDE was used to develop this project. Except for an initial prototype that had to be discarded, there wasn't any "vibe coding." In fact, around 1000 lines of code were written before allowing an LLM to suggest changes. Code brevity was prioritized, and LLM-generated additions are carefully reviewed.
+Dabble is a framework. It ships without any domain-specific configuration — no system prompt, no database, no knowledge base. There are two ways to get started, and they can grow into each other.
 
-For reference, the discarded prototype ballooned to ~10,000 lines within three days and became unmaintainable. The current version is holding at around 2000 lines of Python and remains clean and manageable.
+### Bootstrap mode
 
-The files are longer than ideal, but Cursor makes fewer mistakes with fewer, longer files.
+Point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions. Tell Dabble to import a file:
 
-## Building and Running
+> "Import data/mydata.csv"
 
-### Conda Setup
+Claude inspects the file, creates a persistent table, and you begin exploring immediately. Use `/learn` after productive conversations to save useful sequences into the knowledge base. Domain knowledge accumulates from real sessions rather than being pre-authored. This is the fastest path to value — and how the example conversations in `conversations/` were created.
 
-You will need Conda. To install Conda safely on a Mac:
+### Domain overlay mode
 
-```bash
-brew install conda
-conda init zsh
-conda config --set auto_activate_base false
-```
+For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything Dabble itself does not:
 
-This ensures Conda doesn’t override your system Python and only activates in virtual environments.
+- `prompts/system_prompt.txt` — domain-specific instructions, schema documentation, analytical conventions. This can be large: a prompt covering a complex database with many tables, data quality quirks, and common analytical patterns might run to 20,000 tokens.
+- `knowledge/` — seed `.txt` files that prime the knowledge base before the first session. From there, `/learn` continues to grow it over time, exactly as in bootstrap mode.
+- A DuckDB database file and a ChromaDB knowledge base directory — colocated with the overlay, not in this repository. These are binary files and are not under source control.
 
-To create a virtual environment:
+The overlay and Dabble are wired together via `.env`. Dabble itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
 
-```bash
-conda create -p venv python=3.10
-```
+## The knowledge base
 
-### The Python Project
+The `/learn` command extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search at the start of a new question. In overlay mode the knowledge base starts pre-seeded; in bootstrap mode it starts empty. In both cases `/learn` is how it grows over time. It's how domain knowledge (which columns are reliably populated, what NULL means in a given context, how to join these two tables correctly) accumulates over time.
 
-Clone the repo:
+## Reports
+
+`/report` generates a standalone Streamlit `.py` file: the chart's dataframe is embedded as a CSV literal, and the Plotly code Claude produced is reproduced verbatim. No Dabble dependency. The analyst runs `streamlit run reports/<file>.py` and gets the exact same chart they saw in the conversation.
+
+---
+
+## Setup
+
+**Prerequisites:** conda (recommended — macOS system Python is unreliable across OS upgrades)
 
 ```bash
 git clone <repo_url>
-cd list-pet
-```
-
-Create and activate the virtual environment:
-
-```bash
-conda create -p venv python=3.10
-conda activate ./venv
+cd Dabble
+conda create -n dabble python=3.12
+conda activate dabble
 pip install -r requirements.txt
 ```
 
-If Python packages have drifted, you may need:
+**Configure environment:**
 
 ```bash
-pip install -r requirements_version.txt
+cp .env.example .env
 ```
 
-`requirements_version.txt` was captured as of Feb 2025 using:
+Edit `.env`:
 
-```bash
-pip freeze > requirements_version.txt
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `OPENAI_API_KEY` | Yes | Used for ChromaDB embeddings (text-embedding-3-small) |
+| `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created automatically if it doesn't exist) |
+| `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory (e.g. `db/knowledge_base`) |
+| `CONVERSATIONS_DIR` | No | Where to store conversation files (default: `conversations`) |
+| `KNOWLEDGE_DIR` | No | Where to store knowledge .txt files (default: `knowledge`) |
+| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp (e.g. `SELECT max(updated_at) FROM etl_log`) |
 
-### Running the App
-
-Start Streamlit:
+## Running
 
 ```bash
 streamlit run app.py
 ```
 
-The app will create a local database at `db/list_pet.db`. You can delete or move this file to reset the database (useful for testing).
+The DuckDB file and ChromaDB directory are created automatically on first run.
 
-**TODO:** Add CLI parameter to select or override the database path.
+## Starting with an empty database
 
-Data is stored in DuckDB tables. The message history is stored in a separate `pet-meta` schema, which includes all saved conversations.
+Point `DUCKDB_ANALYTIC_FILE` at a new path (e.g. `db/mydata.duckdb`). The file will be created when the app starts. Then ask Dabble to import your data:
 
-## Running unit tests
-```
-python -m src.chart_renderer
-python -m src.python_executor
-```
+> "Import data/playlist.csv"
 
----
+Claude will inspect the file, confirm the column names, and create a persistent table.
 
-### Old Ollama Pattern (currently not in use)
+## Knowledge base
 
-To run a local model (if/when re-enabled):
+**To seed from existing `.txt` files in `knowledge/`:**
 
 ```bash
-ollama serve
-ollama run deepseek-r1:1.5b
+python -m tools.seed_knowledge_base
 ```
 
+**To clear and rebuild from scratch:**
+
+```bash
+python -m tools.rebuild_knowledge_base
+```
+
+**To add knowledge from a conversation:** type `/learn` during a session. Dabble extracts useful sequences and lets you approve each chunk before saving.
+
+## Conversation files
+
+Each conversation is saved as a plain text file in `conversations/`. These files are the complete record — SQL queries, tool results, and narrative — and are the source material for `/learn`.
