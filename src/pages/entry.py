@@ -22,7 +22,8 @@ def render():
         "- `/learn` — save useful patterns to the knowledge base\n"
         "- `/snapshot` — generate a static shareable chart or table\n"
         "- `/report` — generate a live parameterized Streamlit report\n"
-        "- `/notebook` — generate an editable Marimo notebook"
+        "- `/notebook` — generate an editable Marimo notebook\n\n"
+        "To download a CSV, just ask Claude in the chat."
     )
 
     st.divider()
@@ -52,6 +53,16 @@ def render():
         for r in reports:
             with st.expander(f"{r['date']}  —  {r['title']}"):
                 st.code(f"streamlit run {r['path']}", language="bash")
+                try:
+                    st.download_button(
+                        "Download .py",
+                        data=Path(r["path"]).read_bytes(),
+                        file_name=Path(r["path"]).name,
+                        mime="text/x-python",
+                        key=f"dl_report_{r['path']}",
+                    )
+                except OSError:
+                    pass
 
     snapshots = _list_by_prefix("snapshot")
     if snapshots:
@@ -60,6 +71,18 @@ def render():
         for r in snapshots:
             with st.expander(f"{r['date']}  —  {r['title']}"):
                 st.code(r["path"])
+                try:
+                    html_bytes = Path(r["path"]).read_bytes()
+                    filename = Path(r["path"]).name
+                    st.download_button(
+                        "Download HTML",
+                        data=html_bytes,
+                        file_name=filename,
+                        mime="text/html",
+                        key=f"dl_snap_{r['path']}",
+                    )
+                except OSError:
+                    pass
 
 
 _PREFIX_EXT = {"snapshot": "html", "report": "py", "notebook": "py"}

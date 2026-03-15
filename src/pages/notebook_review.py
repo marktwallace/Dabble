@@ -101,6 +101,13 @@ def _render_preview(draft):
         db_path = os.environ.get("DUCKDB_ANALYTIC_FILE", "")
         prefix = f"DUCKDB_ANALYTIC_FILE={db_path} " if db_path else ""
         st.code(f"{prefix}marimo edit {path}", language="bash")
+        st.download_button(
+            "Download .py",
+            data=Path(path).read_bytes(),
+            file_name=Path(path).name,
+            mime="text/x-python",
+            key="dl_notebook_generated",
+        )
 
     if st.button("Start over"):
         st.session_state.pop("notebook_draft", None)

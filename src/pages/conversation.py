@@ -52,7 +52,7 @@ def render():
             key=uploader_key,
             label_visibility="collapsed",
         )
-    user_input = st.chat_input("Ask anything...")
+    user_input = st.chat_input("Ask a question, or type / for commands...")
 
     if user_input:
         attachment = None
@@ -192,6 +192,19 @@ def _build_file_message(attachment: dict) -> str:
     return f"[File: {name}]\nPath: {path}\n{n} lines\n\n{preview}"
 
 
+_COMMANDS_HELP = (
+    "**Available commands:**\n"
+    "- `/learn` — save useful patterns to the knowledge base\n"
+    "- `/snapshot` — generate a static shareable chart or table\n"
+    "- `/report` — generate a live parameterized Streamlit report\n"
+    "- `/notebook` — generate an editable Marimo notebook\n\n"
+    "To download data as a CSV, just ask — for example: *\"save the results as a CSV\"*.\n\n"
+    "Not sure where to start? Try: *\"Give me an overview of the data.\"*"
+)
+
+_KNOWN_COMMANDS = {"/learn", "/snapshot", "/report", "/notebook"}
+
+
 def _enqueue_input(text, attachment=None):
     if text == "/learn":
         _handle_learn(attachment)
@@ -204,6 +217,11 @@ def _enqueue_input(text, attachment=None):
         return
     if text == "/notebook":
         _handle_notebook()
+        return
+    if text.startswith("/") and text not in _KNOWN_COMMANDS:
+        st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
+        st.session_state.turns.append({"role": "assistant", "text": _COMMANDS_HELP, "tool_calls": []})
+        st.rerun()
         return
 
     path = st.session_state.conversation_path

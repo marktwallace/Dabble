@@ -53,6 +53,14 @@ def render():
     if st.button("Generate snapshot", type="primary"):
         path = _generate(selected)
         st.success(f"Saved: `{path}`")
+        html_bytes = Path(path).read_bytes()
+        st.download_button(
+            "Download HTML",
+            data=html_bytes,
+            file_name=Path(path).name,
+            mime="text/html",
+            key="dl_snap_generated",
+        )
 
 
 # ---------------------------------------------------------------------------
