@@ -9,6 +9,7 @@ from ..claude_handler import ClaudeHandler
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
 KB_PATH = os.environ.get("KB_PATH")
+UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
 
 
 def render():
@@ -25,6 +26,8 @@ def render():
             with st.chat_message("user"):
                 for img in turn.get("images", []):
                     st.image(base64.b64decode(img["data"]))
+                if turn.get("file"):
+                    st.caption(f"📄 {turn['file']['name']}")
                 st.markdown(turn["text"])
         else:
             with st.chat_message("assistant"):
@@ -38,24 +41,35 @@ def render():
     uploader_key = f"uploader_{st.session_state.upload_counter}"
     with st.popover("📎"):
         st.file_uploader(
-            "Attach image",
-            type=["png", "jpg", "jpeg", "gif", "webp"],
+            "Attach file",
+            type=[
+                "png", "jpg", "jpeg", "gif", "webp",
+                "txt", "md", "py", "js", "ts", "jsx", "tsx",
+                "sql", "json", "jsonl", "yaml", "yml", "toml", "xml",
+                "html", "css", "sh", "r", "go", "rs", "java",
+                "scala", "rb", "csv", "tsv", "parquet", "xlsx", "xls",
+            ],
             key=uploader_key,
             label_visibility="collapsed",
         )
     user_input = st.chat_input("Ask anything...")
+
     if user_input:
-        image_data = None
+        attachment = None
         uploaded = st.session_state.get(uploader_key)
         if uploaded is not None:
             raw = uploaded.read()
-            image_data = {
-                "data": base64.b64encode(raw).decode("utf-8"),
-                "media_type": uploaded.type,
-                "name": uploaded.name,
-            }
+            if uploaded.type.startswith("image/"):
+                attachment = {
+                    "kind": "image",
+                    "data": base64.b64encode(raw).decode("utf-8"),
+                    "media_type": uploaded.type,
+                    "name": uploaded.name,
+                }
+            else:
+                attachment = _save_upload(raw, uploaded.name)
             st.session_state.upload_counter += 1
-        _enqueue_input(user_input.strip(), image_data)
+        _enqueue_input(user_input.strip(), attachment)
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +146,55 @@ def _init_session():
 # Input handling
 # ---------------------------------------------------------------------------
 
-def _enqueue_input(text, image_data=None):
+def _save_upload(raw: bytes, name: str) -> dict:
+    """Save an uploaded non-image file to UPLOADS_DIR and return an attachment dict."""
+    uploads = Path(UPLOADS_DIR)
+    uploads.mkdir(parents=True, exist_ok=True)
+    conv_stem = Path(st.session_state.conversation_path).stem
+    dest = uploads / f"{conv_stem}_{name}"
+    dest.write_bytes(raw)
+    try:
+        content = raw.decode("utf-8")
+        is_binary = False
+    except UnicodeDecodeError:
+        content = None
+        is_binary = True
+    return {
+        "kind": "file",
+        "name": name,
+        "path": str(dest.resolve()),
+        "content": content,
+        "size": len(raw),
+        "is_binary": is_binary,
+    }
+
+
+def _build_file_message(attachment: dict) -> str:
+    """Build the text block sent to Claude describing an uploaded file."""
+    name = attachment["name"]
+    path = attachment["path"]
+    size = attachment["size"]
+
+    if attachment["is_binary"]:
+        return f"[File: {name}]\nPath: {path}\nSize: {size // 1024} KB (binary)"
+
+    content = attachment["content"]
+    lines = content.splitlines()
+    n = len(lines)
+
+    if n <= 200 and len(content) <= 8_000:
+        preview = content
+    else:
+        head = "\n".join(lines[:10])
+        tail = "\n".join(lines[-5:])
+        preview = f"{head}\n... ({n - 15} lines omitted) ...\n{tail}"
+
+    return f"[File: {name}]\nPath: {path}\n{n} lines\n\n{preview}"
+
+
+def _enqueue_input(text, attachment=None):
     if text == "/learn":
-        _handle_learn()
+        _handle_learn(attachment)
         return
     if text == "/snapshot":
         _handle_snapshot()
@@ -148,18 +208,23 @@ def _enqueue_input(text, image_data=None):
 
     path = st.session_state.conversation_path
 
-    if image_data:
+    if attachment and attachment["kind"] == "image":
         image_block = {
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": image_data["media_type"],
-                "data": image_data["data"],
+                "media_type": attachment["media_type"],
+                "data": attachment["data"],
             },
         }
         api_content = [image_block, {"type": "text", "text": text}]
-        turn = {"role": "user", "text": text, "images": [image_data]}
-        conv_file.append_user(path, text, image_name=image_data["name"])
+        turn = {"role": "user", "text": text, "images": [attachment]}
+        conv_file.append_user(path, text, image_name=attachment["name"])
+    elif attachment and attachment["kind"] == "file":
+        file_block = {"type": "text", "text": _build_file_message(attachment)}
+        api_content = [file_block, {"type": "text", "text": text}]
+        turn = {"role": "user", "text": text, "file": {"name": attachment["name"]}}
+        conv_file.append_user(path, text, file_attachment=attachment)
     else:
         api_content = text
         turn = {"role": "user", "text": text}
@@ -188,7 +253,9 @@ def _run_agent(text):
 
     if is_first:
         title = handler.generate_title(text)
-        conv_file.write_title(path, title)
+        # Prepend title without losing the user turn already written by append_user
+        existing = Path(path).read_text(encoding="utf-8") if Path(path).exists() else ""
+        Path(path).write_text(title + "\n" + existing, encoding="utf-8")
 
     _write_new_messages(path, new_messages)
     conv_file.save_messages(path, messages)
@@ -197,11 +264,16 @@ def _run_agent(text):
         st.session_state.turns.append(turn)
 
 
-def _handle_learn():
+def _handle_learn(attachment=None):
     path = st.session_state.conversation_path
     with st.spinner("Extracting knowledge chunks..."):
-        text = conv_file.read_text(path)
-        chunks = st.session_state.handler.extract_learn_chunks(text)
+        if attachment and attachment.get("kind") == "file" and attachment.get("content"):
+            chunks = st.session_state.handler.extract_document_chunks(
+                attachment["content"], attachment["name"]
+            )
+        else:
+            text = conv_file.read_text(path)
+            chunks = st.session_state.handler.extract_learn_chunks(text)
     st.session_state.learn_chunks = chunks
     st.session_state.learn_source_path = path
     st.session_state.page = "learn_review"
@@ -266,14 +338,33 @@ def _messages_to_turns(messages: list[dict]) -> list[dict]:
             elif isinstance(content, list) and not any(
                 b.get("type") == "tool_result" for b in content
             ):
-                text = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
                 images = [
                     {"data": b["source"]["data"], "media_type": b["source"].get("media_type", "")}
                     for b in content
                     if b.get("type") == "image" and b.get("source", {}).get("type") == "base64"
                 ]
-                if text or images:
-                    turns.append({"role": "user", "text": text, "images": images})
+                file_info = None
+                text_parts = []
+                for b in content:
+                    if b.get("type") == "text":
+                        t = b.get("text", "")
+                        if file_info is None and t.startswith("[File: ") and "]\n" in t:
+                            fname = t[7:t.index("]\n")]
+                            # Extract saved path if present (Path: line)
+                            fpath = None
+                            for ln in t.splitlines():
+                                if ln.startswith("Path: "):
+                                    fpath = ln[6:].strip()
+                                    break
+                            file_info = {"name": fname, "path": fpath}
+                        else:
+                            text_parts.append(t)
+                text = " ".join(text_parts)
+                turn = {"role": "user", "text": text, "images": images}
+                if file_info:
+                    turn["file"] = file_info
+                if text or images or file_info:
+                    turns.append(turn)
             i += 1
         elif msg["role"] == "assistant":
             result_map = {}

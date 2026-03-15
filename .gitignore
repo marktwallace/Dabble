@@ -179,6 +179,8 @@ dumps/
 logs/
 conversations/
 exports/
+uploads/
+.DS_Store
 knowledge/
 reports/
 notebooks/

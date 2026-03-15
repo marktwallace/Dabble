@@ -15,8 +15,18 @@ def write_title(path: str, title: str) -> None:
         f.write(title + "\n")
 
 
-def append_user(path: str, text: str, image_name: str | None = None) -> None:
-    prefix = f"  [image: {image_name}]\n" if image_name else ""
+def append_user(
+    path: str,
+    text: str,
+    image_name: str | None = None,
+    file_attachment: dict | None = None,
+) -> None:
+    if image_name:
+        prefix = f"  [image: {image_name}]\n"
+    elif file_attachment:
+        prefix = _indent(_file_preview(file_attachment)) + "\n"
+    else:
+        prefix = ""
     _append(path, f"\nUser:\n{prefix}{_indent(text)}\n")
 
 
@@ -72,9 +82,15 @@ def read_text(path: str) -> str:
 
 
 def save_messages(path: str, messages: list[dict]) -> None:
-    """Persist the full messages list as JSON alongside the .txt file."""
+    """Persist the full messages list as JSON alongside the .txt file.
+
+    Base64 image data from user uploads is stripped before saving — it adds
+    significant weight with no recovery value (charts/tables are what matter).
+    A stub source {"type": "omitted"} is left in place so the turn structure
+    is preserved.
+    """
     json_path = Path(path).with_suffix(".json")
-    json_path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(json.dumps(_strip_image_data(messages), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_messages(path: str) -> list[dict]:
@@ -103,6 +119,54 @@ def list_conversations(conversations_dir: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _strip_image_data(messages: list[dict]) -> list[dict]:
+    """Return a copy of messages with base64 image data replaced by a stub."""
+    import copy
+    result = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            result.append(msg)
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            result.append(msg)
+            continue
+        new_content = []
+        for block in content:
+            if (
+                block.get("type") == "image"
+                and block.get("source", {}).get("type") == "base64"
+            ):
+                block = copy.copy(block)
+                block["source"] = {"type": "omitted"}
+            new_content.append(block)
+        new_msg = dict(msg)
+        new_msg["content"] = new_content
+        result.append(new_msg)
+    return result
+
+
+def _file_preview(attachment: dict) -> str:
+    """Build a compact file representation for the .txt transcript."""
+    name = attachment["name"]
+    path = attachment.get("path", "")
+    size = attachment.get("size", 0)
+
+    if attachment.get("is_binary"):
+        return f"[file: {name}]\npath: {path}\nsize: {size // 1024} KB (binary)"
+
+    content = attachment.get("content") or ""
+    lines = content.splitlines()
+    n = len(lines)
+    if n <= 200 and len(content) <= 8_000:
+        preview = content
+    else:
+        head = "\n".join(lines[:10])
+        tail = "\n".join(lines[-5:])
+        preview = f"{head}\n... ({n - 15} lines omitted) ...\n{tail}"
+    return f"[file: {name}]\npath: {path}\n{n} lines\n\n{preview}"
+
 
 def _append(path: str, text: str) -> None:
     with open(path, "a", encoding="utf-8") as f:

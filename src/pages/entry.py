@@ -17,6 +17,14 @@ def render():
         st.session_state.page = "conversation"
         st.rerun()
 
+    st.markdown(
+        "Type these commands in the chat to act on a conversation:\n"
+        "- `/learn` — save useful patterns to the knowledge base\n"
+        "- `/snapshot` — generate a static shareable chart or table\n"
+        "- `/report` — generate a live parameterized Streamlit report\n"
+        "- `/notebook` — generate an editable Marimo notebook"
+    )
+
     st.divider()
 
     conversations = list_conversations(CONVERSATIONS_DIR)

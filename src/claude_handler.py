@@ -480,7 +480,7 @@ class ClaudeHandler:
             "  description: one sentence capturing the intent (used for semantic search)\n"
             "  content: full chunk text including SQL, data notes, and conclusions\n\n"
             "Return only valid JSON, no markdown fences.\n\n"
-            "Conversation:\n\n" + conversation_text[:12000]
+            "Conversation:\n\n" + conversation_text[:80000]
         )
         try:
             response = self.client.messages.create(
@@ -494,3 +494,86 @@ class ClaudeHandler:
             return json.loads(text)
         except Exception:
             return []
+
+    def extract_document_chunks(self, content: str, filename: str) -> list[dict]:
+        """Chunk a reference document for /learn (bypasses conversation analysis).
+
+        Used when the user drops a file and immediately types /learn, rather than
+        sending the file as a regular message first. Splits the document at natural
+        boundaries and asks Claude to generate a search description for each chunk.
+        """
+        segments = _split_document(content)
+        if not segments:
+            return []
+
+        segments_text = "\n\n---\n\n".join(
+            f"Segment {i + 1}:\n{seg}" for i, seg in enumerate(segments)
+        )
+        prompt = (
+            f"You are indexing a reference document ({filename}) for a knowledge base "
+            "used by future data analysis sessions.\n\n"
+            "For each segment below write a one-sentence description capturing what it "
+            "contains (this is used for semantic search). Return a JSON array where each "
+            "object has:\n"
+            "  description: one sentence\n"
+            "  content: the segment text verbatim\n\n"
+            "Return only valid JSON, no markdown fences.\n\n"
+            + segments_text[:60000]
+        )
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            chunks = json.loads(text)
+            # Always use the original segments as content - don't trust Claude to reproduce verbatim
+            for i, chunk in enumerate(chunks):
+                if i < len(segments):
+                    chunk["content"] = segments[i]
+            return chunks
+        except Exception:
+            return []
+
+
+def _split_document(content: str, max_chars: int = 3000) -> list[str]:
+    """Split a document into chunks at natural boundaries.
+
+    Prefers markdown section headers; falls back to paragraph breaks.
+    Merges small segments and hard-splits oversized ones at line boundaries.
+    """
+    header_re = re.compile(r'(?m)(?=^#{1,4} )')
+    if header_re.search(content):
+        parts = header_re.split(content)
+    else:
+        parts = re.split(r'\n\n+', content)
+
+    chunks = []
+    buf = ""
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if len(buf) + len(part) + 2 <= max_chars:
+            buf = (buf + "\n\n" + part).strip() if buf else part
+        else:
+            if buf:
+                chunks.append(buf)
+            if len(part) <= max_chars:
+                buf = part
+            else:
+                lines = part.splitlines(keepends=True)
+                buf = ""
+                for line in lines:
+                    if len(buf) + len(line) <= max_chars:
+                        buf += line
+                    else:
+                        if buf.strip():
+                            chunks.append(buf.strip())
+                        buf = line
+    if buf.strip():
+        chunks.append(buf.strip())
+    return chunks
