@@ -10,7 +10,7 @@ DuckDB is not an incidental choice. It is fast, embedded, and SQL-native — Cla
 
 Every session can produce shareable artifacts directly from the conversation:
 
-**`/snapshot`** — a static standalone Streamlit `.py` file. The selected dataframe is embedded as a CSV literal; the Plotly code is reproduced verbatim. Requires only `streamlit`, `pandas`, `plotly` — no Dabble dependency. Run it anywhere with `streamlit run reports/snapshot_*.py`.
+**`/snapshot`** — a self-contained HTML file. Charts and tables are rendered as interactive Plotly figures. Open in any browser or email as an attachment — no Python required.
 
 **`/report`** — a parameterized Streamlit app that connects to DuckDB at runtime. Claude reads the full conversation to identify parameters (date ranges, filters, groupings) and generates appropriate widgets. The output is an intentionally readable Python file the analyst can open in an editor and extend.
 

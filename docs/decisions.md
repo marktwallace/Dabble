@@ -105,11 +105,27 @@ The threshold was set conservatively. If retrieval turns out to be too aggressiv
 
 ---
 
-## /snapshot generation: template-based, no LLM call
+## /snapshot generation: self-contained HTML, no LLM call
 
-**Decision:** Deterministic f-string templates. Chart code is reproduced verbatim from the saved `render_chart` call. Data is embedded as a CSV string literal.
+**Decision:** Deterministic HTML generation using Plotly's `fig.to_html()`. No LLM call. Output is a `.html` file openable in any browser with no Python dependency.
 
-**Rationale:** The chart code already exists and already worked. Re-asking the LLM to regenerate it introduces unnecessary non-determinism. The snapshot must render identically to what the analyst saw.
+**Rationale:** The figure objects already exist in session state and already rendered correctly. Re-asking the LLM to regenerate chart code introduces unnecessary non-determinism. HTML is strictly better than the previous Streamlit `.py` output for the sharing use case — colleagues can open it in a browser without installing anything.
+
+---
+
+## Plotly figure → HTML export: use `to_html()`, not manual serialisation
+
+**Decision:** Use `fig.to_html(full_html=False, include_plotlyjs='cdn')` as the only path from a Plotly figure to embeddable HTML. Do not parse or re-serialise the figure JSON manually.
+
+**Why this is non-obvious:** Plotly Python 5.x serialises numpy arrays as `{"dtype": "i2", "bdata": "..."}` binary blobs. This is an internal wire format that only the matching version of Plotly.js knows how to decode. `fig.to_dict()` and `plotly.io.to_json()` both produce this format. If you parse the JSON and pass the resulting Python dict to `Plotly.newPlot()` as a plain JS object, Plotly.js silently ignores the binary values and renders all data points as equal. The data looks plausible (a valid chart, just wrong), making this bug hard to spot.
+
+`fig.to_html()` handles the full serialisation pipeline correctly because it uses Plotly's own bootstrap code that was written to decode the binary format.
+
+**CDN version must match:** Do not manually add a generic `plotly-latest.min.js` script tag. Use `include_plotlyjs='cdn'` on the first figure — Plotly injects a script tag pointing to the exact versioned CDN URL that matches the installed Python package. A version mismatch causes the same silent binary-decode failure.
+
+**Template:** Streamlit sets `plotly.io.templates.default = "streamlit"` globally. Figures created during a session carry this template. Strip it before exporting with `fig.update_layout(template="plotly", ...)` on a deepcopy — the "streamlit" template is a Python-side object unknown to Plotly.js and renders with wrong colours in a plain browser context.
+
+**Multi-figure pages:** Pass `include_plotlyjs='cdn'` to the first figure's `to_html()` call and `include_plotlyjs=False` to all subsequent figures. They share the single script tag injected by the first.
 
 ---
 

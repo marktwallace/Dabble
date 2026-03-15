@@ -59,15 +59,19 @@ def render():
         st.subheader("Snapshots")
         for r in snapshots:
             with st.expander(f"{r['date']}  —  {r['title']}"):
-                st.code(f"streamlit run {r['path']}", language="bash")
+                st.code(r["path"])
+
+
+_PREFIX_EXT = {"snapshot": "html", "report": "py", "notebook": "py"}
 
 
 def _list_by_prefix(prefix: str) -> list[dict]:
     reports_dir = Path(REPORTS_DIR)
     if not reports_dir.exists():
         return []
+    ext = _PREFIX_EXT.get(prefix, "py")
     files = sorted(
-        reports_dir.glob(f"{prefix}_*.py"),
+        reports_dir.glob(f"{prefix}_*.{ext}"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

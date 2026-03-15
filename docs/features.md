@@ -160,47 +160,23 @@ The `knowledge/` directory is the durable source of truth. ChromaDB can be fully
 
 ### 5. /snapshot Command
 
-When the analyst types `/snapshot`, the app navigates to a snapshot review screen (not a dialog — a full Streamlit page). On that screen the analyst selects one or more items to include, then clicks Generate to produce a standalone Streamlit Python file.
+When the analyst types `/snapshot`, the app navigates to a snapshot review screen (not a dialog — a full Streamlit page). On that screen the analyst selects one or more items to include, then clicks Generate to produce a self-contained HTML file.
 
 **Selection UI:** Checkboxes, one per available artifact, listed in reverse chronological order (most recent first). The first item is checked by default; the rest are unchecked. Up to 5 are shown initially; a "Show all N options" button reveals the rest. The list includes all charts rendered without error and all dataframes produced by `run_sql` or `run_python`.
 
 **Chronological ordering:** A session-scoped `artifact_order` list records each `run_sql` and successful `render_chart` call in insertion order. The review screen walks it in reverse to produce the option list. This preserves true cross-type ordering — not just within-dict ordering.
 
-The generated file embeds each selected dataframe as a CSV string literal and reproduces each Plotly chart code verbatim. This guarantees the snapshot renders identically to what the analyst saw in the chat — the chart code is the same code Claude produced, run against the same data.
+The generated file is a self-contained HTML page. Charts are rendered as interactive Plotly figures (zoom, hover, tooltips). Tables are rendered as Plotly tables. The only external dependency is the Plotly CDN script tag — the file opens in any browser with no Python required.
 
-**Single-item snapshot structure:**
-
-```python
-import io
-
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-
-st.set_page_config(page_title="<title>", layout="wide")
-st.title("<title>")
-
-DATA = """<csv export of selected dataframe>"""
-
-df = pd.read_csv(io.StringIO(DATA))
-
-<plotly code verbatim from render_chart call>
-
-st.plotly_chart(fig, use_container_width=True)
-```
-
-For a dataframe-only snapshot (no chart), `st.dataframe(df, use_container_width=True)` is used instead.
-
-**Multi-item snapshot structure:** Each selected item becomes a section with `st.subheader()` and `st.divider()` between sections. Each section re-assigns `DATA` and `df` immediately before the chart or table code, so verbatim chart code works correctly regardless of ordering.
+**Structure:** An HTML page with a `<h1>` title. For multi-item snapshots, each section has an `<h2>` header and an `<hr>` divider. For single-item snapshots the `<h2>` is omitted — it would duplicate the page title. The Plotly figure's own title is stripped before export for the same reason. A versioned Plotly CDN script is injected by Plotly's `to_html()` on the first figure; subsequent figures share it.
 
 The snapshot title is derived from the first two selected item names (e.g. "Track Durations & Songs By Artist").
 
-**File naming:** `reports/snapshot_<timestamp>_<first_item_id>.py`.
+**File naming:** `reports/snapshot_<timestamp>_<first_item_id>.html`.
 
-**No Dabble dependency.** Generated files import only: `streamlit`, `pandas`, `plotly`. The analyst runs them with `streamlit run reports/<filename>.py`.
+**No dependencies.** Open in any browser or email as an attachment.
 
-**Template location:** The snapshot file templates are f-strings in `src/pages/snapshot_review.py`. Generation is deterministic — no LLM call is needed.
+**Template location:** `src/pages/snapshot_review.py`. Generation is deterministic — no LLM call is needed.
 
 ---
 
@@ -288,7 +264,7 @@ ChromaDB persistent store at `db/knowledge_base/`. Embeddings via OpenAI text-em
 
 **Knowledge files:** `knowledge/` — plain text sequence chunks, source of truth for ChromaDB.
 
-**Generated files:** `reports/` — standalone Streamlit Python files. Snapshots (`snapshot_*.py`) embed data as CSV literals and require only `streamlit`, `pandas`, `plotly`. Reports (`report_*.py`) connect to DuckDB at runtime and require `duckdb` as well.
+**Generated files:** `reports/` — Snapshots (`snapshot_*.html`) are self-contained HTML files, openable in any browser. Reports (`report_*.py`) are parameterized Streamlit apps that connect to DuckDB at runtime. Notebooks (`notebook_*.py`) are Marimo reactive notebooks.
 
 **Knowledge base:** ChromaDB at `db/knowledge_base/`.
 
