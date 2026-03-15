@@ -1,52 +1,34 @@
 # Dabble
 
-A conversational data analysis tool built on Claude's native tool loop. You ask questions in plain English; it queries DuckDB, renders Plotly charts, and produces standalone Streamlit reports to share with colleagues.
+A conversational data analysis tool built on Claude's native tool loop. You ask questions in plain English; it queries DuckDB, renders Plotly charts, and produces shareable outputs.
 
-The core idea is simple: give Claude a small set of tools — query DuckDB, transform with pandas, render a Plotly chart, search a knowledge base — and let it reason freely within them. No agent framework. No pre-drawn analysis steps. Five tools that form a complete analytical loop, run synchronously until Claude has something worth showing. The architecture fits in a short code review; if a file gets long, the design is probably wrong.
+The tool surface is deliberately small: five tools — `run_sql`, `show_table`, `render_chart`, `run_python`, `search_knowledge_base` — that form a complete analytical loop. Claude isn't writing arbitrary code; it's operating a coherent set of instruments. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results.
 
-DuckDB is not an incidental choice. It is fast, embedded, and SQL-native — Claude can query CSV files, Parquet, or a persistent database file with nothing between it and the data. No connection pool, no server to restart, no ORM. The query-result-iterate loop runs in milliseconds, which is what makes conversational analysis feel responsive rather than tedious, and what separates this from tools that treat the database as a distant service.
+DuckDB is not an incidental choice. It is fast, embedded, and SQL-native — Claude can query CSV files, Parquet, or a persistent database file with nothing between it and the data. The query-result-iterate loop runs in milliseconds.
 
-## Why this works differently from a general-purpose coding assistant
+## Outputs
 
-The tool surface is small and deliberately domain-specific: five tools — `run_sql`, `show_table`, `render_chart`, `run_python`, `search_knowledge_base` — that form a complete analytical loop. None of them is interesting in isolation. Together they cover the full cycle: query data, display it, visualize it, iterate on a chart without re-querying, apply a pandas transform when SQL isn't enough, and retrieve prior domain context. The constraint matters: Claude isn't writing arbitrary code, it's operating a coherent set of instruments.
+Every session can produce shareable artifacts directly from the conversation:
 
-The tool loop itself is about 30 lines. Send messages to Claude, execute tool calls locally when Claude requests them, append results, repeat until Claude stops. No agent framework, no queuing machinery, no intermediate state flags. It runs synchronously as a single Streamlit render pass. Anthropic's prompt caching makes multi-step loops fast — the stable context (system prompt, earlier turns) is cached server-side, so each iteration only re-evaluates new tool results.
+**`/snapshot`** — a static standalone Streamlit `.py` file. The selected dataframe is embedded as a CSV literal; the Plotly code is reproduced verbatim. Requires only `streamlit`, `pandas`, `plotly` — no Dabble dependency. Run it anywhere with `streamlit run reports/snapshot_*.py`.
 
-## Why now and not 18 months ago
+**`/report`** — a parameterized Streamlit app that connects to DuckDB at runtime. Claude reads the full conversation to identify parameters (date ranges, filters, groupings) and generates appropriate widgets. The output is an intentionally readable Python file the analyst can open in an editor and extend.
 
-This architecture is simple enough that it should have worked earlier. It didn't, reliably. The threshold Claude 4.x crossed isn't general capability — it's **reliable multi-step tool use with self-correction**. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results. That loop — call tool, read result as evidence, adjust — is what makes the tool feel like a real analyst rather than an unreliable script. The model quality needed to cross that bar arrived in early 2025.
+**`/notebook`** — a [Marimo](https://marimo.io) reactive notebook. Change a date slider and downstream SQL and charts update automatically. Stored as a plain `.py` file; can be served as an app or edited in an IDE. The analyst owns an artifact they can extend without Dabble.
 
-## How to use this tool
+## Knowledge base
 
-Dabble is a framework. It ships without any domain-specific configuration — no system prompt, no database, no knowledge base. There are two ways to get started, and they can grow into each other.
+`/learn` extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search before each question. Domain knowledge accumulates from real sessions rather than being pre-authored.
 
-### Bootstrap mode
+## Getting started
 
-Point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions. Tell Dabble to import a file:
+**Bootstrap mode:** point `DUCKDB_ANALYTIC_FILE` at a new path and start asking questions.
 
 > "Import data/mydata.csv"
 
-Claude inspects the file, creates a persistent table, and you begin exploring immediately. Use `/learn` after productive conversations to save useful sequences into the knowledge base. Domain knowledge accumulates from real sessions rather than being pre-authored. This is the fastest path to value — and how the example conversations in `conversations/` were created.
+Claude inspects the file, creates a persistent table, and you begin exploring immediately.
 
-### Domain overlay mode
-
-For sustained or production use, a **domain overlay** is a separate (typically private) repository that provides everything Dabble itself does not:
-
-- `prompts/system_prompt.txt` — domain-specific instructions, schema documentation, analytical conventions. This can be large: a prompt covering a complex database with many tables, data quality quirks, and common analytical patterns might run to 20,000 tokens.
-- `knowledge/` — seed `.txt` files that prime the knowledge base before the first session. From there, `/learn` continues to grow it over time, exactly as in bootstrap mode.
-- A DuckDB database file and a ChromaDB knowledge base directory — colocated with the overlay, not in this repository. These are binary files and are not under source control.
-
-The overlay and Dabble are wired together via `.env`. Dabble itself knows nothing about any specific domain. The same codebase serves a clinical genomics database, a USDA nutrition database, a music playlist, or anything else — the overlay is what makes it accurate and useful for a given context.
-
-## The knowledge base
-
-The `/learn` command extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search at the start of a new question. In overlay mode the knowledge base starts pre-seeded; in bootstrap mode it starts empty. In both cases `/learn` is how it grows over time. It's how domain knowledge (which columns are reliably populated, what NULL means in a given context, how to join these two tables correctly) accumulates over time.
-
-## Reports
-
-`/report` generates a standalone Streamlit `.py` file: the chart's dataframe is embedded as a CSV literal, and the Plotly code Claude produced is reproduced verbatim. No Dabble dependency. The analyst runs `streamlit run reports/<file>.py` and gets the exact same chart they saw in the conversation.
-
----
+**Domain overlay mode:** for sustained use, a separate (typically private) repository provides a system prompt, seed knowledge base, and pre-populated DuckDB file, wired to Dabble via `.env`. Dabble itself knows nothing about any specific domain — the overlay is what makes it accurate for a given context.
 
 ## Setup
 
@@ -54,62 +36,33 @@ The `/learn` command extracts analytical sequences from a conversation — the S
 
 ```bash
 git clone <repo_url>
-cd Dabble
+cd list-pet
 conda create -n dabble python=3.12
 conda activate dabble
 pip install -r requirements.txt
 ```
 
-**Configure environment:**
-
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `OPENAI_API_KEY` | Yes | Used for ChromaDB embeddings (text-embedding-3-small) |
-| `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created automatically if it doesn't exist) |
-| `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory (e.g. `db/knowledge_base`) |
-| `CONVERSATIONS_DIR` | No | Where to store conversation files (default: `conversations`) |
-| `KNOWLEDGE_DIR` | No | Where to store knowledge .txt files (default: `knowledge`) |
-| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp (e.g. `SELECT max(updated_at) FROM etl_log`) |
-
-## Running
+| `OPENAI_API_KEY` | Yes | ChromaDB embeddings (text-embedding-3-small) |
+| `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created on first run if absent) |
+| `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory |
+| `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
+| `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
+| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
 
 ```bash
 streamlit run app.py
 ```
 
-The DuckDB file and ChromaDB directory are created automatically on first run.
-
-## Starting with an empty database
-
-Point `DUCKDB_ANALYTIC_FILE` at a new path (e.g. `db/mydata.duckdb`). The file will be created when the app starts. Then ask Dabble to import your data:
-
-> "Import data/playlist.csv"
-
-Claude will inspect the file, confirm the column names, and create a persistent table.
-
-## Knowledge base
-
-**To seed from existing `.txt` files in `knowledge/`:**
+## Knowledge base tools
 
 ```bash
-python -m tools.seed_knowledge_base
+python -m tools.seed_knowledge_base      # load knowledge/ into ChromaDB
+python -m tools.rebuild_knowledge_base   # clear and reload from knowledge/
 ```
-
-**To clear and rebuild from scratch:**
-
-```bash
-python -m tools.rebuild_knowledge_base
-```
-
-**To add knowledge from a conversation:** type `/learn` during a session. Dabble extracts useful sequences and lets you approve each chunk before saving.
-
-## Conversation files
-
-Each conversation is saved as a plain text file in `conversations/`. These files are the complete record — SQL queries, tool results, and narrative — and are the source material for `/learn`.
