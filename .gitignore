@@ -177,10 +177,12 @@ db/
 # Dumps
 dumps/
 logs/
-conversations/
+conversations/*
+!conversations/.gitkeep
 exports/
 uploads/
 .DS_Store
 knowledge/
-reports/
+reports/*
+!reports/.gitkeep
 notebooks/
