@@ -266,15 +266,6 @@ def _run_agent(text):
         kb_context, kb_descriptions = handler.get_kb_context(text)
         messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
 
-    label = f"📚 {len(kb_descriptions)} knowledge chunk(s) retrieved" if kb_descriptions else "📚 No knowledge retrieved"
-    with st.expander(label, expanded=False):
-        if kb_descriptions:
-            for desc, dist in kb_descriptions:
-                st.markdown(f"- `{dist}` — {desc}")
-            st.caption("L2 distance (normalised embeddings): 0 = identical, threshold = 1.0 ≈ cosine similarity 0.5")
-        else:
-            st.markdown("_Nothing matched in the knowledge base for this query._")
-
     st.session_state.messages = messages
     new_messages = messages[prev_len:]
 
@@ -287,7 +278,9 @@ def _run_agent(text):
     _write_new_messages(path, new_messages)
     conv_file.save_messages(path, messages)
 
-    for turn in _extract_assistant_turns(new_messages):
+    for i, turn in enumerate(_extract_assistant_turns(new_messages)):
+        if i == 0:
+            turn["kb_descriptions"] = kb_descriptions  # attach to first turn for display
         st.session_state.turns.append(turn)
 
 
@@ -474,6 +467,17 @@ def _extract_assistant_turns(new_messages):
 # ---------------------------------------------------------------------------
 
 def _render_assistant_turn(turn, turn_idx, is_latest):
+    kb_descriptions = turn.get("kb_descriptions")
+    if kb_descriptions is not None:
+        label = f"📚 {len(kb_descriptions)} knowledge chunk(s) retrieved" if kb_descriptions else "📚 No knowledge retrieved"
+        with st.expander(label, expanded=False):
+            if kb_descriptions:
+                for desc, dist in kb_descriptions:
+                    st.markdown(f"- `{dist}` — {desc}")
+                st.caption("L2 distance (normalised embeddings): 0 = identical, threshold = 1.0 ≈ cosine similarity 0.5")
+            else:
+                st.markdown("_Nothing matched in the knowledge base for this query._")
+
     for tc in turn["tool_calls"]:
         with st.expander(_expander_label(tc["name"], tc["inputs"]), expanded=is_latest):
             name = tc["name"]
