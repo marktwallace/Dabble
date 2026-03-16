@@ -120,7 +120,7 @@ def _init_session():
         st.session_state.upload_counter = 0
 
     if "handler" not in st.session_state:
-        prompt_path = Path(PROMPTS_DIR) / "system_prompt.txt"
+        prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
         schema = _build_schema_context()
         if schema:
