@@ -138,7 +138,8 @@ def _init_session():
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
-        if saved:
+        if saved and path:
+            _attach_kb_contexts(st.session_state.turns, path)
             _replay_tool_calls(saved, st.session_state.handler)
 
 
@@ -264,6 +265,7 @@ def _run_agent(text):
 
     with st.spinner("working..."):
         kb_context, kb_descriptions = handler.get_kb_context(text)
+        conv_file.append_kb_context(path, kb_descriptions)
         messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
 
     st.session_state.messages = messages
@@ -292,7 +294,7 @@ def _handle_learn(attachment=None):
                 attachment["content"], attachment["name"]
             )
         else:
-            text = conv_file.read_text(path)
+            text = conv_file.read_text_for_learn(path)
             chunks = st.session_state.handler.extract_learn_chunks(text)
     st.session_state.learn_chunks = chunks
     st.session_state.learn_source_path = path
@@ -420,6 +422,15 @@ def _messages_to_turns(messages: list[dict]) -> list[dict]:
     return turns
 
 
+def _attach_kb_contexts(turns: list[dict], path: str) -> None:
+    """Attach persisted kb_context blocks to their corresponding assistant turns."""
+    blocks = conv_file.parse_kb_contexts(path)
+    assistant_turns = [t for t in turns if t["role"] == "assistant"]
+    for i, kb_descs in enumerate(blocks):
+        if i < len(assistant_turns):
+            assistant_turns[i]["kb_descriptions"] = kb_descs
+
+
 def _extract_assistant_turns(new_messages):
     turns = []
     i = 0
@@ -467,13 +478,15 @@ def _extract_assistant_turns(new_messages):
 # ---------------------------------------------------------------------------
 
 def _render_assistant_turn(turn, turn_idx, is_latest):
-    kb_descriptions = turn.get("kb_descriptions")
-    if kb_descriptions is not None:
-        label = f"📚 {len(kb_descriptions)} knowledge chunk(s) retrieved" if kb_descriptions else "📚 No knowledge retrieved"
+    kb_chunks = turn.get("kb_descriptions")
+    if kb_chunks is not None:
+        label = f"📚 {len(kb_chunks)} knowledge chunk(s) retrieved" if kb_chunks else "📚 No knowledge retrieved"
         with st.expander(label, expanded=False):
-            if kb_descriptions:
-                for desc, dist in kb_descriptions:
-                    st.markdown(f"- `{dist}` — {desc}")
+            if kb_chunks:
+                for chunk in kb_chunks:
+                    st.markdown(f"**`{chunk['distance']}`** — {chunk['description']}")
+                    if chunk.get("content"):
+                        st.code(chunk["content"], language=None)
                 st.caption("L2 distance (normalised embeddings): 0 = identical, threshold = 1.0 ≈ cosine similarity 0.5")
             else:
                 st.markdown("_Nothing matched in the knowledge base for this query._")

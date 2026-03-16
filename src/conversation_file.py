@@ -77,8 +77,90 @@ def get_title(path: str) -> str:
 
 
 def read_text(path: str) -> str:
-    """Return the full conversation file contents (used by /learn)."""
+    """Return the full conversation file contents."""
     return Path(path).read_text(encoding="utf-8")
+
+
+def read_text_for_learn(path: str) -> str:
+    """Return conversation text with kb_context blocks stripped.
+
+    The kb_context blocks are useful for auditing but would cause /learn
+    to duplicate existing knowledge base content.
+    """
+    return _strip_kb_context(Path(path).read_text(encoding="utf-8"))
+
+
+def append_kb_context(path: str, chunks: list[dict]) -> None:
+    """Write a kb_context block to the transcript after the User turn.
+
+    Each chunk dict has 'description', 'distance', and 'content'.
+    The full content is indented under each header line so the block
+    is self-contained and auditable.
+    """
+    if not chunks:
+        return
+    lines = ["kb_context:"]
+    for chunk in chunks:
+        lines.append(f"  {chunk['distance']:.3f} — {chunk['description']}")
+        for content_line in chunk["content"].splitlines():
+            lines.append(f"    {content_line}")
+    _append(path, "\n".join(lines) + "\n")
+
+
+def parse_kb_contexts(path: str) -> list[list[dict]]:
+    """Extract all kb_context blocks from a conversation file.
+
+    Returns a list of chunk lists, one per kb_context block found,
+    in file order. Each chunk is a dict with 'description', 'distance',
+    and 'content'.
+    """
+    import re
+    text = Path(path).read_text(encoding="utf-8")
+    blocks: list[list[dict]] = []
+    for m in re.finditer(
+        r"^kb_context:\n((?:[ ]{2,}.+\n)*)",
+        text,
+        re.MULTILINE,
+    ):
+        block_text = m.group(1)
+        chunks: list[dict] = []
+        current_desc = None
+        current_dist = 0.0
+        content_lines: list[str] = []
+
+        for line in block_text.splitlines():
+            if line.startswith("  ") and not line.startswith("    "):
+                # Header line: save previous chunk
+                if current_desc is not None:
+                    chunks.append({
+                        "description": current_desc,
+                        "distance": current_dist,
+                        "content": "\n".join(content_lines),
+                    })
+                # Parse new header
+                header = line.strip()
+                if " — " in header:
+                    dist_str, desc = header.split(" — ", 1)
+                    try:
+                        current_dist = float(dist_str)
+                    except ValueError:
+                        current_dist = 0.0
+                    current_desc = desc
+                else:
+                    current_desc = header
+                    current_dist = 0.0
+                content_lines = []
+            elif line.startswith("    "):
+                content_lines.append(line[4:])  # strip 4-space indent
+
+        if current_desc is not None:
+            chunks.append({
+                "description": current_desc,
+                "distance": current_dist,
+                "content": "\n".join(content_lines),
+            })
+        blocks.append(chunks)
+    return blocks
 
 
 def save_messages(path: str, messages: list[dict]) -> None:
@@ -186,3 +268,10 @@ def _kv(key: str, value) -> str:
     first = lines[0]
     rest = "\n".join("    " + ln for ln in lines[1:])
     return f"  {key}: {first}\n{rest}"
+
+
+def _strip_kb_context(text: str) -> str:
+    """Remove all kb_context blocks from conversation text."""
+    import re
+    # Header lines are 2-space indented; content lines are 4-space indented.
+    return re.sub(r"^kb_context:\n(?:[ ]{2,}.+\n)*", "", text, flags=re.MULTILINE)
