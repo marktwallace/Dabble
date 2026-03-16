@@ -40,6 +40,7 @@ def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
             "description": doc,
             "content": meta.get("full_text", doc),
             "source": meta.get("source_file", "unknown"),
+            "distance": round(dist, 3),
         }
         for chunk_id, doc, meta, dist in zip(
             results["ids"][0],

@@ -263,8 +263,17 @@ def _run_agent(text):
     st.session_state.tables_to_show = []
 
     with st.spinner("working..."):
-        kb_context = handler.get_kb_context(text)
+        kb_context, kb_descriptions = handler.get_kb_context(text)
         messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
+
+    label = f"📚 {len(kb_descriptions)} knowledge chunk(s) retrieved" if kb_descriptions else "📚 No knowledge retrieved"
+    with st.expander(label, expanded=False):
+        if kb_descriptions:
+            for desc, dist in kb_descriptions:
+                st.markdown(f"- `{dist}` — {desc}")
+            st.caption("L2 distance (normalised embeddings): 0 = identical, threshold = 1.0 ≈ cosine similarity 0.5")
+        else:
+            st.markdown("_Nothing matched in the knowledge base for this query._")
 
     st.session_state.messages = messages
     new_messages = messages[prev_len:]

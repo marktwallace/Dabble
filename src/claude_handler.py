@@ -252,21 +252,26 @@ class ClaudeHandler:
         st.session_state.exported_files[filename] = path.read_bytes()
         return f"Saved {len(df)} rows to {path}"
 
-    def get_kb_context(self, query: str) -> str:
+    def get_kb_context(self, query: str) -> tuple[str, list[str]]:
         """Search the knowledge base and return only chunks not yet injected this session.
 
         Deduplicates by chunk ID so the same content is never injected twice,
         keeping the system prompt stable across turns and preserving cache hits.
+
+        Returns (context_string, list_of_descriptions) so callers can show
+        what was retrieved without re-querying.
         """
         if not self.kb_path:
-            return ""
+            return "", []
         chunks = kb_search(query, self.kb_path)
         new_chunks = [c for c in chunks if c["id"] not in self._injected_chunk_ids]
         for c in new_chunks:
             self._injected_chunk_ids.add(c["id"])
         if not new_chunks:
-            return ""
-        return "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(new_chunks, 1))
+            return "", []
+        context = "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(new_chunks, 1))
+        descriptions = [(c["description"], c["distance"]) for c in new_chunks]
+        return context, descriptions
 
     # --- Tool loop -----------------------------------------------------------
 
