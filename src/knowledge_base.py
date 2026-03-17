@@ -8,7 +8,7 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 COLLECTION_NAME = "dabble_kb"
 CHUNK_SEPARATOR = "\n---\n"
 DESCRIPTION_PREFIX = "description: "
-DISTANCE_THRESHOLD = 1.0  # L2 distance; ~cosine similarity > 0.5 for normalised embeddings
+SIMILARITY_THRESHOLD = 0.5  # cosine similarity: 1.0 = identical, 0 = unrelated
 
 
 def _collection(db_path: str):
@@ -17,7 +17,11 @@ def _collection(db_path: str):
         api_key=os.environ["OPENAI_API_KEY"],
         model_name="text-embedding-3-small",
     )
-    return client.get_or_create_collection(COLLECTION_NAME, embedding_function=ef)
+    return client.get_or_create_collection(
+        COLLECTION_NAME,
+        embedding_function=ef,
+        metadata={"hnsw:space": "cosine"},
+    )
 
 
 def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
@@ -40,7 +44,7 @@ def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
             "description": doc,
             "content": meta.get("full_text", doc),
             "source": meta.get("source_file", "unknown"),
-            "distance": round(dist, 3),
+            "similarity": round(1.0 - dist, 3),
         }
         for chunk_id, doc, meta, dist in zip(
             results["ids"][0],
@@ -48,7 +52,7 @@ def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
             results["metadatas"][0],
             results["distances"][0],
         )
-        if dist < DISTANCE_THRESHOLD
+        if (1.0 - dist) >= SIMILARITY_THRESHOLD
     ]
 
 

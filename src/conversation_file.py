@@ -93,7 +93,7 @@ def read_text_for_learn(path: str) -> str:
 def append_kb_context(path: str, chunks: list[dict]) -> None:
     """Write a kb_context block to the transcript after the User turn.
 
-    Each chunk dict has 'description', 'distance', and 'content'.
+    Each chunk dict has 'description', 'similarity', and 'content'.
     The full content is indented under each header line so the block
     is self-contained and auditable.
     """
@@ -101,7 +101,7 @@ def append_kb_context(path: str, chunks: list[dict]) -> None:
         return
     lines = ["kb_context:"]
     for chunk in chunks:
-        lines.append(f"  {chunk['distance']:.3f} — {chunk['description']}")
+        lines.append(f"  {chunk['similarity']:.3f} — {chunk['description']}")
         for content_line in chunk["content"].splitlines():
             lines.append(f"    {content_line}")
     _append(path, "\n".join(lines) + "\n")
@@ -111,7 +111,7 @@ def parse_kb_contexts(path: str) -> list[list[dict]]:
     """Extract all kb_context blocks from a conversation file.
 
     Returns a list of chunk lists, one per kb_context block found,
-    in file order. Each chunk is a dict with 'description', 'distance',
+    in file order. Each chunk is a dict with 'description', 'similarity',
     and 'content'.
     """
     import re
@@ -125,7 +125,7 @@ def parse_kb_contexts(path: str) -> list[list[dict]]:
         block_text = m.group(1)
         chunks: list[dict] = []
         current_desc = None
-        current_dist = 0.0
+        current_sim = 0.0
         content_lines: list[str] = []
 
         for line in block_text.splitlines():
@@ -134,21 +134,21 @@ def parse_kb_contexts(path: str) -> list[list[dict]]:
                 if current_desc is not None:
                     chunks.append({
                         "description": current_desc,
-                        "distance": current_dist,
+                        "similarity": current_sim,
                         "content": "\n".join(content_lines),
                     })
                 # Parse new header
                 header = line.strip()
                 if " — " in header:
-                    dist_str, desc = header.split(" — ", 1)
+                    sim_str, desc = header.split(" — ", 1)
                     try:
-                        current_dist = float(dist_str)
+                        current_sim = float(sim_str)
                     except ValueError:
-                        current_dist = 0.0
+                        current_sim = 0.0
                     current_desc = desc
                 else:
                     current_desc = header
-                    current_dist = 0.0
+                    current_sim = 0.0
                 content_lines = []
             elif line.startswith("    "):
                 content_lines.append(line[4:])  # strip 4-space indent
@@ -156,7 +156,7 @@ def parse_kb_contexts(path: str) -> list[list[dict]]:
         if current_desc is not None:
             chunks.append({
                 "description": current_desc,
-                "distance": current_dist,
+                "similarity": current_sim,
                 "content": "\n".join(content_lines),
             })
         blocks.append(chunks)

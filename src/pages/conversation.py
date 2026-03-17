@@ -130,6 +130,7 @@ def _init_session():
     path = st.session_state.get("conversation_path")
     if st.session_state.get("_active_path") != path:
         st.session_state._active_path = path
+        st.session_state.handler.reset_kb_tracking()
         st.session_state.dataframes = {}
         st.session_state.figures = {}
         st.session_state.artifact_order = []
@@ -484,10 +485,10 @@ def _render_assistant_turn(turn, turn_idx, is_latest):
         with st.expander(label, expanded=False):
             if kb_chunks:
                 for chunk in kb_chunks:
-                    st.markdown(f"**`{chunk['distance']}`** — {chunk['description']}")
+                    st.markdown(f"**{chunk['similarity']:.0%}** — {chunk['description']}")
                     if chunk.get("content"):
                         st.code(chunk["content"], language=None)
-                st.caption("L2 distance (normalised embeddings): 0 = identical, threshold = 1.0 ≈ cosine similarity 0.5")
+                st.caption("Cosine similarity: 100% = identical, threshold = 50%")
             else:
                 st.markdown("_Nothing matched in the knowledge base for this query._")
 

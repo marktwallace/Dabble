@@ -71,6 +71,10 @@ class ClaudeHandler:
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
+    def reset_kb_tracking(self) -> None:
+        """Clear injected-chunk tracking. Call when starting a new conversation."""
+        self._injected_chunk_ids.clear()
+
     # --- Tool definitions ---------------------------------------------------
 
     def _tools(self) -> list[dict]:
@@ -272,7 +276,7 @@ class ClaudeHandler:
             return "", []
         context = "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(new_chunks, 1))
         details = [
-            {"description": c["description"], "distance": c["distance"], "content": c["content"]}
+            {"description": c["description"], "similarity": c["similarity"], "content": c["content"]}
             for c in new_chunks
         ]
         return context, details
