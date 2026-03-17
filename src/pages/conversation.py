@@ -6,6 +6,7 @@ import streamlit as st
 
 from .. import conversation_file as conv_file
 from ..claude_handler import ClaudeHandler
+from ..knowledge_base import diagnostics as kb_diagnostics
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
 KB_PATH = os.environ.get("KB_PATH")
@@ -197,6 +198,7 @@ def _build_file_message(attachment: dict) -> str:
 _COMMANDS_HELP = (
     "**Available commands:**\n"
     "- `/learn` — save useful patterns to the knowledge base\n"
+    "- `/kb` — show how the knowledge base matches a query\n"
     "- `/snapshot` — generate a static shareable chart or table\n"
     "- `/report` — generate a live parameterized Streamlit report\n"
     "- `/notebook` — generate an editable Marimo notebook\n\n"
@@ -204,12 +206,15 @@ _COMMANDS_HELP = (
     "Not sure where to start? Try: *\"Give me an overview of the data.\"*"
 )
 
-_KNOWN_COMMANDS = {"/learn", "/snapshot", "/report", "/notebook"}
+_KNOWN_COMMANDS = {"/learn", "/kb", "/snapshot", "/report", "/notebook"}
 
 
 def _enqueue_input(text, attachment=None):
     if text == "/learn":
         _handle_learn(attachment)
+        return
+    if text.startswith("/kb"):
+        _handle_kb(text)
         return
     if text == "/snapshot":
         _handle_snapshot()
@@ -220,7 +225,7 @@ def _enqueue_input(text, attachment=None):
     if text == "/notebook":
         _handle_notebook()
         return
-    if text.startswith("/") and text not in _KNOWN_COMMANDS:
+    if text.startswith("/") and text.split()[0] not in _KNOWN_COMMANDS:
         st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
         st.session_state.turns.append({"role": "assistant", "text": _COMMANDS_HELP, "tool_calls": []})
         st.rerun()
@@ -300,6 +305,59 @@ def _handle_learn(attachment=None):
     st.session_state.learn_chunks = chunks
     st.session_state.learn_source_path = path
     st.session_state.page = "learn_review"
+    st.rerun()
+
+
+def _handle_kb(text):
+    query = text[len("/kb"):].strip()
+    if not query:
+        # Use the last user message as the query
+        user_turns = [t for t in st.session_state.turns if t["role"] == "user"]
+        if user_turns:
+            query = user_turns[-1]["text"]
+        else:
+            st.session_state.turns.append({"role": "user", "text": "/kb", "tool_calls": []})
+            st.session_state.turns.append({
+                "role": "assistant",
+                "text": "No previous message to match against. Try `/kb your query here`.",
+                "tool_calls": [],
+            })
+            st.rerun()
+            return
+
+    if not KB_PATH:
+        st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": "Knowledge base not configured (`KB_PATH` not set).",
+            "tool_calls": [],
+        })
+        st.rerun()
+        return
+
+    result = kb_diagnostics(query, KB_PATH)
+    lines = [
+        f"**Knowledge base:** {result['total_chunks']} chunk(s), "
+        f"similarity threshold = {result['threshold']}\n",
+        f"**Query:** {query}\n",
+    ]
+    if result["matches"]:
+        lines.append("| Similarity | Retrieved? | Source | Description |")
+        lines.append("|---:|:---:|:---|:---|")
+        for m in result["matches"]:
+            check = "yes" if m["would_retrieve"] else "no"
+            lines.append(
+                f"| {m['similarity']:.3f} | {check} | {m['source']} | {m['description']} |"
+            )
+    else:
+        lines.append("_Knowledge base is empty._")
+
+    st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
+    st.session_state.turns.append({
+        "role": "assistant",
+        "text": "\n".join(lines),
+        "tool_calls": [],
+    })
     st.rerun()
 
 
@@ -485,10 +543,10 @@ def _render_assistant_turn(turn, turn_idx, is_latest):
         with st.expander(label, expanded=False):
             if kb_chunks:
                 for chunk in kb_chunks:
-                    st.markdown(f"**{chunk['similarity']:.0%}** — {chunk['description']}")
+                    st.markdown(f"**{chunk['similarity']:.3f}** — {chunk['description']}")
                     if chunk.get("content"):
                         st.code(chunk["content"], language=None)
-                st.caption("Cosine similarity: 100% = identical, threshold = 50%")
+                st.caption("Cosine similarity: 1.0 = identical, 0.0 = unrelated")
             else:
                 st.markdown("_Nothing matched in the knowledge base for this query._")
 

@@ -8,7 +8,7 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 COLLECTION_NAME = "dabble_kb"
 CHUNK_SEPARATOR = "\n---\n"
 DESCRIPTION_PREFIX = "description: "
-SIMILARITY_THRESHOLD = 0.5  # cosine similarity: 1.0 = identical, 0 = unrelated
+SIMILARITY_THRESHOLD = 0.35  # cosine similarity: 1.0 = identical, 0 = unrelated
 
 
 def _collection(db_path: str):
@@ -54,6 +54,36 @@ def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
         )
         if (1.0 - dist) >= SIMILARITY_THRESHOLD
     ]
+
+
+def diagnostics(query: str, db_path: str, n_results: int = 5) -> dict:
+    """Return KB stats and top matches for a query, ignoring the threshold.
+
+    Used by /kb to give full visibility into matching behaviour.
+    """
+    col = _collection(db_path)
+    total = col.count()
+    if total == 0:
+        return {"total_chunks": 0, "threshold": SIMILARITY_THRESHOLD, "matches": []}
+    results = col.query(
+        query_texts=[query],
+        n_results=min(n_results, total),
+        include=["documents", "metadatas", "distances"],
+    )
+    matches = [
+        {
+            "description": doc,
+            "similarity": round(1.0 - dist, 3),
+            "source": meta.get("source_file", "unknown"),
+            "would_retrieve": (1.0 - dist) >= SIMILARITY_THRESHOLD,
+        }
+        for doc, meta, dist in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        )
+    ]
+    return {"total_chunks": total, "threshold": SIMILARITY_THRESHOLD, "matches": matches}
 
 
 def add_chunk(text: str, metadata: dict, db_path: str):
