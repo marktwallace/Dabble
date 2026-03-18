@@ -490,7 +490,8 @@ class ClaudeHandler:
             "iteration), key data shape observations, domain corrections, or schema/data quality "
             "discoveries. Prefer sequences that show *how to reason* in this domain over isolated facts.\n\n"
             "Return a JSON array. Each object must have:\n"
-            "  description: one sentence capturing the intent (used for semantic search)\n"
+            "  description: the question a future user would ask to find this chunk "
+            "(e.g. 'how to join runs with reportable calls' not 'sequencing run query patterns')\n"
             "  content: full chunk text including SQL, data notes, and conclusions\n\n"
             "Return only valid JSON, no markdown fences.\n\n"
             "Conversation:\n\n" + conversation_text[:80000]
@@ -525,10 +526,10 @@ class ClaudeHandler:
         prompt = (
             f"You are indexing a reference document ({filename}) for a knowledge base "
             "used by future data analysis sessions.\n\n"
-            "For each segment below write a one-sentence description capturing what it "
-            "contains (this is used for semantic search). Return a JSON array where each "
-            "object has:\n"
-            "  description: one sentence\n"
+            "For each segment below, write a description: the question a future user would ask "
+            "to find this information (used for semantic search).\n\n"
+            "Return a JSON array where each object has:\n"
+            "  description: user question that would retrieve this chunk\n"
             "  content: the segment text verbatim\n\n"
             "Return only valid JSON, no markdown fences.\n\n"
             + segments_text[:60000]

@@ -2,7 +2,7 @@ anthropic
 chromadb
 duckdb
 numpy
-openai
+sentence-transformers
 openpyxl
 pandas
 plotly

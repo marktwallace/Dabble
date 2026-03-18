@@ -1,9 +1,7 @@
 import hashlib
-import os
 from pathlib import Path
 
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 COLLECTION_NAME = "dabble_kb"
 CHUNK_SEPARATOR = "\n---\n"
@@ -13,13 +11,8 @@ SIMILARITY_THRESHOLD = 0.35  # cosine similarity: 1.0 = identical, 0 = unrelated
 
 def _collection(db_path: str):
     client = chromadb.PersistentClient(path=db_path)
-    ef = OpenAIEmbeddingFunction(
-        api_key=os.environ["OPENAI_API_KEY"],
-        model_name="text-embedding-3-small",
-    )
     return client.get_or_create_collection(
         COLLECTION_NAME,
-        embedding_function=ef,
         metadata={"hnsw:space": "cosine"},
     )
 
