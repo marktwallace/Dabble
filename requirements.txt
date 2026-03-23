@@ -1,7 +1,7 @@
 anthropic
 boto3
 chromadb<1.0.0
-duckdb
+duckdb==1.5.1
 numpy
 sentence-transformers
 openpyxl
