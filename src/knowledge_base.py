@@ -10,7 +10,7 @@ SIMILARITY_THRESHOLD = 0.35  # cosine similarity: 1.0 = identical, 0 = unrelated
 
 
 def _collection(db_path: str):
-    client = chromadb.PersistentClient(path=db_path)
+    client = chromadb.PersistentClient(path=db_path, settings=chromadb.Settings(anonymized_telemetry=False))
     return client.get_or_create_collection(
         COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
@@ -108,7 +108,7 @@ def rebuild_from_directory(knowledge_dir: str, db_path: str) -> int:
     Each .txt file in the directory may contain multiple chunks separated by
     a line containing only '---'. Returns the number of chunks loaded.
     """
-    client = chromadb.PersistentClient(path=db_path)
+    client = chromadb.PersistentClient(path=db_path, settings=chromadb.Settings(anonymized_telemetry=False))
     try:
         client.delete_collection(COLLECTION_NAME)
     except Exception:

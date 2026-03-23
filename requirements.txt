@@ -1,5 +1,6 @@
 anthropic
-chromadb
+boto3
+chromadb<1.0.0
 duckdb
 numpy
 sentence-transformers

@@ -30,6 +30,10 @@ def df_summary(df: pd.DataFrame) -> str:
         series = df[col].dropna()
         if series.empty:
             lines.append(f"  {col}: all null")
+        elif pd.api.types.is_bool_dtype(df[col]):
+            counts = series.value_counts()
+            parts = ", ".join(f"{v} ({c})" for v, c in counts.items())
+            lines.append(f"  {col}: {parts}")
         elif pd.api.types.is_numeric_dtype(df[col]):
             lines.append(
                 f"  {col}: min={series.min():.4g}  max={series.max():.4g}  mean={series.mean():.4g}"
