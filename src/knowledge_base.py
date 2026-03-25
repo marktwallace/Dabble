@@ -102,6 +102,14 @@ def add_chunk(text: str, metadata: dict, db_path: str):
     )
 
 
+def remove_chunks_by_source(source_file: str, db_path: str):
+    """Delete all ChromaDB chunks whose source_file matches the given filename."""
+    col = _collection(db_path)
+    results = col.get(where={"source_file": source_file})
+    if results["ids"]:
+        col.delete(ids=results["ids"])
+
+
 def rebuild_from_directory(knowledge_dir: str, db_path: str) -> int:
     """Clear ChromaDB and reload all chunks from knowledge_dir.
 

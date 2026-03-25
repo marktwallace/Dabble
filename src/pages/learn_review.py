@@ -3,7 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from ..knowledge_base import add_chunk
+from ..knowledge_base import add_chunk, remove_chunks_by_source
 
 KNOWLEDGE_DIR = os.environ.get("KNOWLEDGE_DIR", "knowledge")
 KB_PATH = os.environ.get("KB_PATH")
@@ -38,7 +38,6 @@ def render():
     if st.button(
         f"Save {len(approved)} chunk{'s' if len(approved) != 1 else ''}",
         type="primary",
-        disabled=not approved,
     ):
         _save(approved)
         st.session_state.page = "conversation"
@@ -47,12 +46,15 @@ def render():
 
 def _save(chunks):
     source_path = st.session_state.get("learn_source_path", "")
-    stem = Path(source_path).stem if source_path else "manual"
+    stem = Path(source_path).stem if source_path else ""
+    stem = stem or "manual"
     out_path = Path(KNOWLEDGE_DIR) / f"{stem}.txt"
 
     chunk_texts = [f"description: {c['description']}\n{c['content']}" for c in chunks]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(CHUNK_SEPARATOR.join(chunk_texts), encoding="utf-8")
 
     if KB_PATH:
+        remove_chunks_by_source(out_path.name, KB_PATH)
         for text in chunk_texts:
             add_chunk(text, {"source_file": out_path.name}, KB_PATH)

@@ -16,6 +16,9 @@ class DuckDBAnalytic:
 
     Local file mode   — DUCKDB_ANALYTIC_FILE is set.
         Opens a plain DuckDB file directly. No S3 involved.
+    DuckLake mode requires DABBLE_DB_NAME — the catalog alias and metadata catalog
+    base name. This must match what the ETL used when writing.
+
     """
 
     def __init__(self):
@@ -35,6 +38,12 @@ class DuckDBAnalytic:
         else:
             self._connect_local()
         self.cached_timestamp = self._query_timestamp()
+
+    def _db_name(self) -> str:
+        name = os.environ.get("DABBLE_DB_NAME")
+        if not name:
+            raise RuntimeError("DABBLE_DB_NAME is required for DuckLake mode")
+        return name
 
     def _connect_ducklake(self, bucket: str):
         prefix = os.environ.get("DABBLE_S3_PREFIX", "prod")
@@ -61,14 +70,16 @@ class DuckDBAnalytic:
         # virtual-hosted-style (https://<bucket>.s3.amazonaws.com) over HTTPS
         # because AWS can't issue a wildcard cert for dotted subdomains.
         self.conn.execute("SET s3_url_style = 'path';")
+        db_name = self._db_name()
         self.conn.execute(f"""
-            ATTACH 'ducklake:{self._local_catalog_path}' AS diagonal (
+            ATTACH 'ducklake:{self._local_catalog_path}' AS {db_name} (
                 DATA_PATH 's3://{bucket}/{prefix}/data/',
-                METADATA_CATALOG 'diagonal_meta',
+                METADATA_CATALOG '{db_name}_meta',
                 OVERRIDE_DATA_PATH TRUE
             )
         """)
-        self.conn.execute("USE diagonal")
+        self.conn.execute(f"USE {db_name}")
+        self._assert_tables_exist(self._local_catalog_path)
 
     def _connect_local(self):
         data_path = os.environ.get("DABBLE_DATA_PATH")
@@ -89,19 +100,30 @@ class DuckDBAnalytic:
         import os as _os
         catalog_path = _os.path.join(data_path, "catalog.duckdb")
         parquet_data = _os.path.join(data_path, "data")
+        if not _os.path.exists(catalog_path):
+            raise FileNotFoundError(f"DuckLake catalog not found: {catalog_path}")
         if self.conn:
             self.conn.close()
         self.conn = duckdb.connect()
         self.conn.execute("SET TimeZone = 'UTC'")
         self.conn.execute("INSTALL ducklake; LOAD ducklake;")
+        db_name = self._db_name()
         self.conn.execute(f"""
-            ATTACH 'ducklake:{catalog_path}' AS diagonal (
+            ATTACH 'ducklake:{catalog_path}' AS {db_name} (
                 DATA_PATH '{parquet_data}/',
-                METADATA_CATALOG 'diagonal_meta',
+                METADATA_CATALOG '{db_name}_meta',
                 OVERRIDE_DATA_PATH TRUE
             )
         """)
-        self.conn.execute("USE diagonal")
+        self.conn.execute(f"USE {db_name}")
+        self._assert_tables_exist(catalog_path)
+
+    def _assert_tables_exist(self, catalog_path: str):
+        tables = self.conn.execute("SHOW TABLES").fetchall()
+        if not tables:
+            raise RuntimeError(
+                f"DuckLake attached but contains no tables — catalog may be empty or corrupt: {catalog_path}"
+            )
 
     # ------------------------------------------------------------------
     # Refresh (replaces hot-swap)
@@ -142,7 +164,7 @@ class DuckDBAnalytic:
             try:
                 result = self.conn.execute("""
                     SELECT MAX(snapshot_time)
-                    FROM ducklake_snapshots('diagonal')
+                    FROM ducklake_snapshots('{self._db_name()}')
                 """).fetchone()
                 if result and result[0]:
                     val = result[0]
