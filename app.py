@@ -3,7 +3,7 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 from src.duckdb_analytic import DuckDBAnalytic
 from src.pages import conversation, entry, learn_review, notebook_review, report_review, snapshot_review
