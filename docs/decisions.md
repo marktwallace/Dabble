@@ -241,6 +241,20 @@ UTF-16 encoded files (e.g. Apple Music exports) are decoded after a UTF-8 attemp
 
 ---
 
+## Knowledge base: `knowledge/` directory is the source of truth
+
+**Decision:** The `knowledge/` directory is authoritative. ChromaDB is a derived index that must always reflect exactly what the files contain — no more, no less.
+
+**Consequence:** Every save in `/learn` calls `remove_chunks_by_source()` to delete all existing ChromaDB entries for that source file before adding the newly selected chunks. This means re-running `/learn` on a conversation replaces its previous contribution to the KB, rather than accumulating on top of it.
+
+**Why this matters:** The two stores have different natural update semantics — files overwrite, ChromaDB only adds. Without the delete-before-add step, re-learning from the same conversation silently grows ChromaDB while the file only reflects the most recent selection. The file and the index diverge, and there is no way to audit what is actually retrievable short of querying ChromaDB directly.
+
+**`/kb rebuild`** exists as the escape hatch for cases where the two stores have diverged anyway (crash mid-save, manual file edit). It clears ChromaDB entirely and reloads from the files. This is only safe because the files are always written first.
+
+**Saving zero chunks is valid:** The Save button in the learn review screen is never disabled. Saving with nothing selected clears all ChromaDB entries for that conversation's source file — the correct behaviour for "I want to un-learn everything from this session."
+
+---
+
 ## Stay on Streamlit
 
 **Decision:** Streamlit remains the UI framework. No migration to Panel, Gradio, or a custom frontend.
