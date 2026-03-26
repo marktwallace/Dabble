@@ -199,6 +199,7 @@ _COMMANDS_HELP = (
     "**Available commands:**\n"
     "- `/learn` — save useful patterns to the knowledge base\n"
     "- `/kb` — show how the knowledge base matches a query\n"
+    "- `/refresh` — reload the database (picks up latest ETL run)\n"
     "- `/snapshot` — generate a static shareable chart or table\n"
     "- `/report` — generate a live parameterized Streamlit report\n"
     "- `/notebook` — generate an editable Marimo notebook\n\n"
@@ -206,7 +207,7 @@ _COMMANDS_HELP = (
     "Not sure where to start? Try: *\"Give me an overview of the data.\"*"
 )
 
-_KNOWN_COMMANDS = {"/learn", "/kb", "/snapshot", "/report", "/notebook"}
+_KNOWN_COMMANDS = {"/learn", "/kb", "/snapshot", "/report", "/notebook", "/refresh"}
 
 
 def _enqueue_input(text, attachment=None):
@@ -224,6 +225,9 @@ def _enqueue_input(text, attachment=None):
         return
     if text == "/notebook":
         _handle_notebook()
+        return
+    if text == "/refresh":
+        _handle_refresh()
         return
     if text.startswith("/") and text.split()[0] not in _KNOWN_COMMANDS:
         st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
@@ -358,6 +362,30 @@ def _handle_kb(text):
         "text": "\n".join(lines),
         "tool_calls": [],
     })
+    st.rerun()
+
+
+def _handle_refresh():
+    db = st.session_state.get("analytic_db")
+    st.session_state.turns.append({"role": "user", "text": "/refresh", "tool_calls": []})
+    if not db:
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": "No database connection to refresh.",
+            "tool_calls": [],
+        })
+    elif db.refresh():
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": f"Database refreshed. Data as of: {db.get_timestamp()}",
+            "tool_calls": [],
+        })
+    else:
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": "Refresh failed — check logs for details.",
+            "tool_calls": [],
+        })
     st.rerun()
 
 

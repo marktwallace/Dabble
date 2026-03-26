@@ -160,11 +160,12 @@ class DuckDBAnalytic:
             return "Unknown"
 
         # DuckLake mode: use snapshot log
-        if os.environ.get("DABBLE_S3_BUCKET"):
+        if os.environ.get("DABBLE_S3_BUCKET") or os.environ.get("DABBLE_DATA_PATH"):
             try:
-                result = self.conn.execute("""
+                db_name = self._db_name()
+                result = self.conn.execute(f"""
                     SELECT MAX(snapshot_time)
-                    FROM ducklake_snapshots('{self._db_name()}')
+                    FROM ducklake_snapshots('{db_name}')
                 """).fetchone()
                 if result and result[0]:
                     val = result[0]
