@@ -6,10 +6,10 @@ import streamlit as st
 
 from .. import conversation_file as conv_file
 from ..claude_handler import ClaudeHandler
-from ..knowledge_base import diagnostics as kb_diagnostics
+from ..knowledge_base import list_registry
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
-KB_PATH = os.environ.get("KB_PATH")
+KNOWLEDGE_DIR = os.environ.get("KNOWLEDGE_DIR", "knowledge")
 UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
 
 
@@ -126,12 +126,11 @@ def _init_session():
         schema = _build_schema_context()
         if schema:
             system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
-        st.session_state.handler = ClaudeHandler(system_prompt, KB_PATH)
+        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR)
 
     path = st.session_state.get("conversation_path")
     if st.session_state.get("_active_path") != path:
         st.session_state._active_path = path
-        st.session_state.handler.reset_kb_tracking()
         st.session_state.dataframes = {}
         st.session_state.figures = {}
         st.session_state.artifact_order = []
@@ -140,8 +139,6 @@ def _init_session():
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
-        if saved and path:
-            _attach_kb_contexts(st.session_state.turns, path)
             _replay_tool_calls(saved, st.session_state.handler)
 
 
@@ -274,9 +271,7 @@ def _run_agent(text):
     st.session_state.tables_to_show = []
 
     with st.spinner("working..."):
-        kb_context, kb_descriptions = handler.get_kb_context(text)
-        conv_file.append_kb_context(path, kb_descriptions)
-        messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
+        messages, _response = handler.run_tool_loop(st.session_state.messages)
 
     st.session_state.messages = messages
     new_messages = messages[prev_len:]
@@ -290,9 +285,7 @@ def _run_agent(text):
     _write_new_messages(path, new_messages)
     conv_file.save_messages(path, messages)
 
-    for i, turn in enumerate(_extract_assistant_turns(new_messages)):
-        if i == 0:
-            turn["kb_descriptions"] = kb_descriptions  # attach to first turn for display
+    for turn in _extract_assistant_turns(new_messages):
         st.session_state.turns.append(turn)
 
 
@@ -329,30 +322,13 @@ def _handle_kb(text):
             st.rerun()
             return
 
-    if not KB_PATH:
-        st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
-        st.session_state.turns.append({
-            "role": "assistant",
-            "text": "Knowledge base not configured (`KB_PATH` not set).",
-            "tool_calls": [],
-        })
-        st.rerun()
-        return
-
-    result = kb_diagnostics(query, KB_PATH)
-    lines = [
-        f"**Knowledge base:** {result['total_chunks']} chunk(s), "
-        f"similarity threshold = {result['threshold']}\n",
-        f"**Query:** {query}\n",
-    ]
-    if result["matches"]:
-        lines.append("| Similarity | Retrieved? | Source | Description |")
-        lines.append("|---:|:---:|:---|:---|")
-        for m in result["matches"]:
-            check = "yes" if m["would_retrieve"] else "no"
-            lines.append(
-                f"| {m['similarity']:.3f} | {check} | {m['source']} | {m['description']} |"
-            )
+    entries = list_registry(KNOWLEDGE_DIR)
+    lines = [f"**Knowledge base:** {len(entries)} chunk(s)\n"]
+    if entries:
+        lines.append("| Chunk | Description |")
+        lines.append("|:---|:---|")
+        for e in entries:
+            lines.append(f"| `{e['slug']}` | {e['description']} |")
     else:
         lines.append("_Knowledge base is empty._")
 
@@ -509,15 +485,6 @@ def _messages_to_turns(messages: list[dict]) -> list[dict]:
     return turns
 
 
-def _attach_kb_contexts(turns: list[dict], path: str) -> None:
-    """Attach persisted kb_context blocks to their corresponding assistant turns."""
-    blocks = conv_file.parse_kb_contexts(path)
-    assistant_turns = [t for t in turns if t["role"] == "assistant"]
-    for i, kb_descs in enumerate(blocks):
-        if i < len(assistant_turns):
-            assistant_turns[i]["kb_descriptions"] = kb_descs
-
-
 def _extract_assistant_turns(new_messages):
     turns = []
     i = 0
@@ -565,18 +532,6 @@ def _extract_assistant_turns(new_messages):
 # ---------------------------------------------------------------------------
 
 def _render_assistant_turn(turn, turn_idx, is_latest):
-    kb_chunks = turn.get("kb_descriptions")
-    if kb_chunks is not None:
-        label = f"📚 {len(kb_chunks)} knowledge chunk(s) retrieved" if kb_chunks else "📚 No knowledge retrieved"
-        with st.expander(label, expanded=False):
-            if kb_chunks:
-                for chunk in kb_chunks:
-                    st.markdown(f"**{chunk['similarity']:.3f}** — {chunk['description']}")
-                    if chunk.get("content"):
-                        st.code(chunk["content"], language=None)
-                st.caption("Cosine similarity: 1.0 = identical, 0.0 = unrelated")
-            else:
-                st.markdown("_Nothing matched in the knowledge base for this query._")
 
     for tc in turn["tool_calls"]:
         with st.expander(_expander_label(tc["name"], tc["inputs"]), expanded=is_latest):

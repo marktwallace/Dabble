@@ -5,15 +5,11 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic",
     "boto3",
-    "chromadb<1.0.0",
     "duckdb==1.5.1",
     "numpy",
-    "sentence-transformers",
     "openpyxl",
     "pandas",
     "plotly",
     "python-dotenv",
-    "scikit-learn",
-    "scipy",
     "streamlit",
 ]

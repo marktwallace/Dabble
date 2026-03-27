@@ -1,133 +1,71 @@
-import hashlib
+import re
 from pathlib import Path
 
-import chromadb
 
-COLLECTION_NAME = "dabble_kb"
-CHUNK_SEPARATOR = "\n---\n"
-DESCRIPTION_PREFIX = "description: "
-SIMILARITY_THRESHOLD = 0.35  # cosine similarity: 1.0 = identical, 0 = unrelated
-
-
-def _collection(db_path: str):
-    client = chromadb.PersistentClient(path=db_path, settings=chromadb.Settings(anonymized_telemetry=False))
-    return client.get_or_create_collection(
-        COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"},
-    )
+def slug_from_description(description: str) -> str:
+    slug = description.lower()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug.strip())
+    slug = slug[:50].rstrip("-")
+    return slug or "chunk"
 
 
-def search(query: str, db_path: str, n_results: int = 5) -> list[dict]:
-    """Return up to n_results chunks relevant to query.
-
-    Each result has 'description' (what was embedded) and 'content' (full chunk text).
-    Returns [] if the knowledge base is empty.
-    """
-    col = _collection(db_path)
-    if col.count() == 0:
-        return []
-    results = col.query(
-        query_texts=[query],
-        n_results=min(n_results, col.count()),
-        include=["documents", "metadatas", "distances"],
-    )
-    return [
-        {
-            "id": chunk_id,
-            "description": doc,
-            "content": meta.get("full_text", doc),
-            "source": meta.get("source_file", "unknown"),
-            "similarity": round(1.0 - dist, 3),
-        }
-        for chunk_id, doc, meta, dist in zip(
-            results["ids"][0],
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        )
-        if (1.0 - dist) >= SIMILARITY_THRESHOLD
-    ]
+def _unique_slug(base: str, knowledge_dir: str) -> str:
+    path = Path(knowledge_dir)
+    slug = base
+    i = 2
+    while (path / f"{slug}.txt").exists():
+        slug = f"{base}-{i}"
+        i += 1
+    return slug
 
 
-def diagnostics(query: str, db_path: str, n_results: int = 5) -> dict:
-    """Return KB stats and top matches for a query, ignoring the threshold.
-
-    Used by /kb to give full visibility into matching behaviour.
-    """
-    col = _collection(db_path)
-    total = col.count()
-    if total == 0:
-        return {"total_chunks": 0, "threshold": SIMILARITY_THRESHOLD, "matches": []}
-    results = col.query(
-        query_texts=[query],
-        n_results=min(n_results, total),
-        include=["documents", "metadatas", "distances"],
-    )
-    matches = [
-        {
-            "description": doc,
-            "similarity": round(1.0 - dist, 3),
-            "source": meta.get("source_file", "unknown"),
-            "would_retrieve": (1.0 - dist) >= SIMILARITY_THRESHOLD,
-        }
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        )
-    ]
-    return {"total_chunks": total, "threshold": SIMILARITY_THRESHOLD, "matches": matches}
+def list_registry(knowledge_dir: str) -> list[dict]:
+    """Return [{slug, description}] for all chunk files in knowledge_dir."""
+    results = []
+    for p in sorted(Path(knowledge_dir).glob("*.txt")):
+        try:
+            first_line = next(
+                (l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()),
+                ""
+            )
+        except Exception:
+            continue
+        if first_line.lower().startswith("description:"):
+            description = first_line[len("description:"):].strip()
+        else:
+            description = first_line[:100]
+        results.append({"slug": p.stem, "description": description})
+    return results
 
 
-def add_chunk(text: str, metadata: dict, db_path: str):
-    """Add a single chunk to ChromaDB.
-
-    The first line of the chunk text should start with 'description: ' — that
-    line is what gets embedded and matched at retrieval time. The full text is
-    stored in metadata and returned to Claude when the chunk is retrieved.
-
-    Uses a content hash as the ID, so rebuilding from the same files is idempotent.
-    """
-    lines = text.strip().splitlines()
-    if lines and lines[0].lower().startswith(DESCRIPTION_PREFIX):
-        description = lines[0][len(DESCRIPTION_PREFIX):].strip()
-    else:
-        description = text[:200]
-
-    chunk_id = hashlib.md5(text.encode()).hexdigest()
-    _collection(db_path).add(
-        documents=[description],
-        metadatas=[{**metadata, "full_text": text}],
-        ids=[chunk_id],
-    )
+def build_registry_block(knowledge_dir: str) -> str:
+    """Build the <available_knowledge> block for system prompt injection."""
+    if not knowledge_dir or not Path(knowledge_dir).exists():
+        return ""
+    entries = list_registry(knowledge_dir)
+    if not entries:
+        return ""
+    lines = ["<available_knowledge>"]
+    for e in entries:
+        lines.append(f"{e['slug']}: {e['description']}")
+    lines.append("</available_knowledge>")
+    return "\n".join(lines)
 
 
-def remove_chunks_by_source(source_file: str, db_path: str):
-    """Delete all ChromaDB chunks whose source_file matches the given filename."""
-    col = _collection(db_path)
-    results = col.get(where={"source_file": source_file})
-    if results["ids"]:
-        col.delete(ids=results["ids"])
+def read_chunk(slug: str, knowledge_dir: str) -> str:
+    """Return the full content of a chunk file."""
+    path = Path(knowledge_dir) / f"{slug}.txt"
+    if not path.exists():
+        return f"Error: no knowledge chunk named '{slug}'."
+    return path.read_text(encoding="utf-8")
 
 
-def rebuild_from_directory(knowledge_dir: str, db_path: str) -> int:
-    """Clear ChromaDB and reload all chunks from knowledge_dir.
-
-    Each .txt file in the directory may contain multiple chunks separated by
-    a line containing only '---'. Returns the number of chunks loaded.
-    """
-    client = chromadb.PersistentClient(path=db_path, settings=chromadb.Settings(anonymized_telemetry=False))
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
-
-    count = 0
-    for filepath in sorted(Path(knowledge_dir).glob("*.txt")):
-        source = filepath.name
-        for chunk in filepath.read_text(encoding="utf-8").split(CHUNK_SEPARATOR):
-            chunk = chunk.strip()
-            if chunk:
-                add_chunk(chunk, {"source_file": source}, db_path)
-                count += 1
-    return count
+def write_chunk(description: str, content: str, knowledge_dir: str) -> str:
+    """Write a chunk as its own file. Returns the slug used."""
+    base = slug_from_description(description)
+    slug = _unique_slug(base, knowledge_dir)
+    path = Path(knowledge_dir) / f"{slug}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"description: {description}\n\n{content}", encoding="utf-8")
+    return slug
