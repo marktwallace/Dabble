@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+KNOWLEDGE_DIR = "knowledge"
+
 
 def slug_from_description(description: str) -> str:
     slug = description.lower()
@@ -10,8 +12,8 @@ def slug_from_description(description: str) -> str:
     return slug or "chunk"
 
 
-def _unique_slug(base: str, knowledge_dir: str) -> str:
-    path = Path(knowledge_dir)
+def _unique_slug(base: str) -> str:
+    path = Path(KNOWLEDGE_DIR)
     slug = base
     i = 2
     while (path / f"{slug}.txt").exists():
@@ -20,10 +22,10 @@ def _unique_slug(base: str, knowledge_dir: str) -> str:
     return slug
 
 
-def list_registry(knowledge_dir: str) -> list[dict]:
-    """Return [{slug, description}] for all chunk files in knowledge_dir."""
+def list_registry() -> list[dict]:
+    """Return [{slug, description}] for all chunk files in KNOWLEDGE_DIR."""
     results = []
-    for p in sorted(Path(knowledge_dir).glob("*.txt")):
+    for p in sorted(Path(KNOWLEDGE_DIR).glob("*.txt")):
         try:
             first_line = next(
                 (l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()),
@@ -39,11 +41,11 @@ def list_registry(knowledge_dir: str) -> list[dict]:
     return results
 
 
-def build_registry_block(knowledge_dir: str) -> str:
+def build_registry_block() -> str:
     """Build the <available_knowledge> block for system prompt injection."""
-    if not knowledge_dir or not Path(knowledge_dir).exists():
+    if not Path(KNOWLEDGE_DIR).exists():
         return ""
-    entries = list_registry(knowledge_dir)
+    entries = list_registry()
     if not entries:
         return ""
     lines = ["<available_knowledge>"]
@@ -53,19 +55,19 @@ def build_registry_block(knowledge_dir: str) -> str:
     return "\n".join(lines)
 
 
-def read_chunk(slug: str, knowledge_dir: str) -> str:
+def read_chunk(slug: str) -> str:
     """Return the full content of a chunk file."""
-    path = Path(knowledge_dir) / f"{slug}.txt"
+    path = Path(KNOWLEDGE_DIR) / f"{slug}.txt"
     if not path.exists():
         return f"Error: no knowledge chunk named '{slug}'."
     return path.read_text(encoding="utf-8")
 
 
-def write_chunk(description: str, content: str, knowledge_dir: str) -> str:
+def write_chunk(description: str, content: str) -> str:
     """Write a chunk as its own file. Returns the slug used."""
     base = slug_from_description(description)
-    slug = _unique_slug(base, knowledge_dir)
-    path = Path(knowledge_dir) / f"{slug}.txt"
+    slug = _unique_slug(base)
+    path = Path(KNOWLEDGE_DIR) / f"{slug}.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"description: {description}\n\n{content}", encoding="utf-8")
     return slug
