@@ -20,7 +20,7 @@ mkdir -p "$HOME/logs"
 nohup uv run streamlit run app.py \
     --server.port "$PORT" \
     --server.baseUrlPath "$SERVER_BASE_URL_PATH" \
-    > "$LOG_FILE" 2>&1 &
+    >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
 echo "$DEPLOY_NAME started on :$PORT at $SERVER_BASE_URL_PATH — log: $LOG_FILE"
