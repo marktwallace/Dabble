@@ -13,3 +13,13 @@ dependencies = [
     "python-dotenv",
     "streamlit",
 ]
+
+[dependency-groups]
+dev = ["ruff"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

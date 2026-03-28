@@ -139,7 +139,7 @@ def _init_session():
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
-            _replay_tool_calls(saved, st.session_state.handler)
+        _replay_tool_calls(saved, st.session_state.handler)
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ def list_registry() -> list[dict]:
     for p in sorted(Path(KNOWLEDGE_DIR).glob("*.txt")):
         try:
             first_line = next(
-                (l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()),
+                (line.strip() for line in p.read_text(encoding="utf-8").splitlines() if line.strip()),
                 ""
             )
         except Exception:
