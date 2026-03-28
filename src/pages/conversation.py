@@ -120,17 +120,15 @@ def _init_session():
     if "upload_counter" not in st.session_state:
         st.session_state.upload_counter = 0
 
-    if "handler" not in st.session_state:
+    path = st.session_state.get("conversation_path")
+    if st.session_state.get("_active_path") != path:
+        st.session_state._active_path = path
         prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
         schema = _build_schema_context()
         if schema:
             system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
         st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR)
-
-    path = st.session_state.get("conversation_path")
-    if st.session_state.get("_active_path") != path:
-        st.session_state._active_path = path
         st.session_state.dataframes = {}
         st.session_state.figures = {}
         st.session_state.artifact_order = []
