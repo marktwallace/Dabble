@@ -6,8 +6,8 @@ DEPLOY_NAME="$(basename "$SCRIPT_DIR")"
 PID_FILE="$HOME/.$DEPLOY_NAME.pid"
 LOG_FILE="$HOME/logs/$DEPLOY_NAME.log"
 
-# Load uv into PATH
-. "$HOME/.local/bin/env"
+# Ensure uv is on PATH (not available in non-interactive shells unless sourced)
+command -v uv &>/dev/null || . "$HOME/.local/bin/env"
 
 # Load app config (.env must define PORT and SERVER_BASE_URL_PATH)
 set -a
