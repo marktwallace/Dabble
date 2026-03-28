@@ -66,6 +66,9 @@ class DuckDBAnalytic:
         self.conn.execute("SET TimeZone = 'UTC'")
         self.conn.execute("INSTALL ducklake; LOAD ducklake;")
         self.conn.execute("INSTALL httpfs; LOAD httpfs;")
+        # Use EC2 instance role (or any credential in the AWS default chain).
+        # In-memory only — lives for the lifetime of this connection.
+        self.conn.execute("CREATE SECRET s3_creds (TYPE S3, PROVIDER CREDENTIAL_CHAIN);")
         # Force path-style URLs — buckets with dots in the name don't work with
         # virtual-hosted-style (https://<bucket>.s3.amazonaws.com) over HTTPS
         # because AWS can't issue a wildcard cert for dotted subdomains.
