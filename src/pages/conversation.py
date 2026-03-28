@@ -2,6 +2,7 @@ import base64
 import os
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from .. import conversation_file as conv_file
@@ -192,8 +193,8 @@ def _build_file_message(attachment: dict) -> str:
 
 _COMMANDS_HELP = (
     "**Available commands:**\n"
-    "- `/learn` — save useful patterns to the knowledge base\n"
-    "- `/kb` — show how the knowledge base matches a query\n"
+    "- `/learn` — save useful patterns from this conversation to the knowledge base\n"
+    "- `/kb` — list what's in the knowledge base\n"
     "- `/refresh` — reload the database (picks up latest ETL run)\n"
     "- `/snapshot` — generate a static shareable chart or table\n"
     "- `/report` — generate a live parameterized Streamlit report\n"
@@ -210,7 +211,7 @@ def _enqueue_input(text, attachment=None):
         _handle_learn(attachment)
         return
     if text.startswith("/kb"):
-        _handle_kb(text)
+        _handle_kb()
         return
     if text == "/snapshot":
         _handle_snapshot()
@@ -303,38 +304,18 @@ def _handle_learn(attachment=None):
     st.rerun()
 
 
-def _handle_kb(text):
-    query = text[len("/kb"):].strip()
-    if not query:
-        # Use the last user message as the query
-        user_turns = [t for t in st.session_state.turns if t["role"] == "user"]
-        if user_turns:
-            query = user_turns[-1]["text"]
-        else:
-            st.session_state.turns.append({"role": "user", "text": "/kb", "tool_calls": []})
-            st.session_state.turns.append({
-                "role": "assistant",
-                "text": "No previous message to match against. Try `/kb your query here`.",
-                "tool_calls": [],
-            })
-            st.rerun()
-            return
-
+def _handle_kb():
     entries = list_registry(KNOWLEDGE_DIR)
-    lines = [f"**Knowledge base:** {len(entries)} chunk(s)\n"]
+    st.session_state.turns.append({"role": "user", "text": "/kb", "tool_calls": []})
     if entries:
-        lines.append("| Chunk | Description |")
-        lines.append("|:---|:---|")
-        for e in entries:
-            lines.append(f"| `{e['slug']}` | {e['description']} |")
+        hint = "_Ask Claude to update, merge, or delete any of these — or ask for a full cleanup pass. Tip: chunks with a shared slug prefix (e.g. `run-joining-*`) sort together alphabetically._"
     else:
-        lines.append("_Knowledge base is empty._")
-
-    st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
+        hint = "_Knowledge base is empty. Use /learn after a productive conversation to start building it._"
     st.session_state.turns.append({
         "role": "assistant",
-        "text": "\n".join(lines),
+        "text": f"**Knowledge base:** {len(entries)} chunk(s)\n\n{hint}",
         "tool_calls": [],
+        "kb_entries": entries,
     })
     st.rerun()
 
@@ -530,6 +511,19 @@ def _extract_assistant_turns(new_messages):
 # ---------------------------------------------------------------------------
 
 def _render_assistant_turn(turn, turn_idx, is_latest):
+
+    if "kb_entries" in turn and turn["kb_entries"]:
+        df = pd.DataFrame(turn["kb_entries"])[["slug", "description", "date"]]
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "slug": st.column_config.TextColumn("Chunk", width="medium"),
+                "description": st.column_config.TextColumn("Description", width="large"),
+                "date": st.column_config.TextColumn("Saved", width="small"),
+            },
+        )
 
     for tc in turn["tool_calls"]:
         with st.expander(_expander_label(tc["name"], tc["inputs"]), expanded=is_latest):

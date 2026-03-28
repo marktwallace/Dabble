@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -35,7 +36,8 @@ def list_registry(knowledge_dir: str) -> list[dict]:
             description = first_line[len("description:"):].strip()
         else:
             description = first_line[:100]
-        results.append({"slug": p.stem, "description": description})
+        mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d")
+        results.append({"slug": p.stem, "description": description, "date": mtime})
     return results
 
 
@@ -69,3 +71,16 @@ def write_chunk(description: str, content: str, knowledge_dir: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"description: {description}\n\n{content}", encoding="utf-8")
     return slug
+
+
+def overwrite_chunk(slug: str, description: str, content: str, knowledge_dir: str) -> None:
+    """Write a chunk to an explicit slug, overwriting any existing file."""
+    path = Path(knowledge_dir) / f"{slug}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"description: {description}\n\n{content}", encoding="utf-8")
+
+
+def delete_chunk(slug: str, knowledge_dir: str) -> None:
+    """Delete a chunk file. Raises FileNotFoundError if it doesn't exist."""
+    path = Path(knowledge_dir) / f"{slug}.txt"
+    path.unlink()

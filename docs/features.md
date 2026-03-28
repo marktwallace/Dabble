@@ -156,13 +156,7 @@ The `knowledge/` directory is the durable source of truth. Each chunk is one fil
 
 ### 5. /kb Command
 
-A diagnostic command for inspecting the knowledge base registry. Does not inject context into Claude — it shows the developer or analyst what chunks exist and what their routing descriptions say.
-
-Two forms:
-- `/kb` — lists all chunks in the registry
-- `/kb some query text` — reserved for future filtering; currently shows the full registry
-
-Returns a table in the conversation showing: total chunk count, and for each chunk — its slug and description. Useful for verifying KB state after `/learn` and for understanding why Claude did or did not recall a chunk in a previous session.
+A diagnostic command for inspecting the knowledge base. Returns a table in the conversation showing total chunk count and, for each chunk, its slug and description. Useful for verifying KB state after `/learn` and for understanding what Claude can see at the start of a session.
 
 ---
 

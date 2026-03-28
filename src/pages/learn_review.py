@@ -37,8 +37,16 @@ def render():
         type="primary",
     ):
         _save(approved)
-        st.session_state.page = "conversation"
+        st.session_state.learn_saved = True
         st.rerun()
+
+    if st.session_state.get("learn_saved"):
+        st.success("Saved. Chunks will be available from your next conversation.")
+        st.caption("If any overlap with existing knowledge, ask Claude to merge them — type /kb to review.")
+        if st.button("Back to conversation"):
+            st.session_state.learn_saved = False
+            st.session_state.page = "conversation"
+            st.rerun()
 
 
 def _save(chunks):

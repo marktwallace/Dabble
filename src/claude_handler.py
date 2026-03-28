@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from .chart_renderer import render_chart as _render_chart
-from .knowledge_base import build_registry_block, read_chunk
+from .knowledge_base import build_registry_block, delete_chunk, overwrite_chunk, read_chunk, write_chunk
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +169,53 @@ class ClaudeHandler:
                 },
             },
             {
+                "name": "update_knowledge",
+                "description": (
+                    "Create or overwrite a knowledge base chunk. "
+                    "Use this to save a new chunk, edit an existing one, or write a merged replacement. "
+                    "If updating an existing chunk, pass its slug from <available_knowledge>. "
+                    "If creating a new chunk, omit slug and one will be derived from the description. "
+                    "Changes take effect from the next conversation — tell the user this after saving."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "description": "Routing phrase completing 'recall this when the user asks about ___'. Be specific.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Full chunk content: SQL, data notes, join patterns, domain corrections, etc.",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "Chunk name to overwrite (from <available_knowledge>). Omit to create a new chunk.",
+                        },
+                    },
+                    "required": ["description", "content"],
+                },
+            },
+            {
+                "name": "delete_knowledge",
+                "description": (
+                    "Delete a knowledge base chunk by slug. "
+                    "Use after merging chunks or when a chunk is stale or incorrect. "
+                    "For bulk deletions (3 or more), list the slugs you plan to remove and "
+                    "wait for explicit user confirmation before calling this tool."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "slug": {
+                            "type": "string",
+                            "description": "The chunk slug to delete (from <available_knowledge>).",
+                        },
+                    },
+                    "required": ["slug"],
+                },
+            },
+            {
                 "name": "save_file",
                 "description": (
                     "Save a dataframe to a file. The file is placed in the exports/ directory "
@@ -203,6 +250,10 @@ class ClaudeHandler:
                 return self._save_file(inputs["dataframe_id"], inputs["filename"], inputs["format"])
             elif name == "recall_knowledge":
                 return self._recall_knowledge(inputs["chunk"])
+            elif name == "update_knowledge":
+                return self._update_knowledge(inputs["description"], inputs["content"], inputs.get("slug"))
+            elif name == "delete_knowledge":
+                return self._delete_knowledge(inputs["slug"])
             else:
                 return f"Unknown tool: {name}"
         except Exception:
@@ -280,6 +331,25 @@ class ClaudeHandler:
         if not self.knowledge_dir:
             return "Error: no knowledge directory configured."
         return read_chunk(chunk, self.knowledge_dir)
+
+    def _update_knowledge(self, description: str, content: str, slug: str | None) -> str:
+        if not self.knowledge_dir:
+            return "Error: no knowledge directory configured."
+        if slug:
+            overwrite_chunk(slug, description, content, self.knowledge_dir)
+            return f"Updated chunk '{slug}'. Takes effect from the next conversation."
+        else:
+            saved_slug = write_chunk(description, content, self.knowledge_dir)
+            return f"Saved new chunk '{saved_slug}'. Takes effect from the next conversation."
+
+    def _delete_knowledge(self, slug: str) -> str:
+        if not self.knowledge_dir:
+            return "Error: no knowledge directory configured."
+        try:
+            delete_chunk(slug, self.knowledge_dir)
+            return f"Deleted chunk '{slug}'."
+        except FileNotFoundError:
+            return f"Error: no chunk named '{slug}'."
 
     # --- Tool loop -----------------------------------------------------------
 
