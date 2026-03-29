@@ -1,9 +1,16 @@
+import logging
 import os
 
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv(override=False)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 
 from src.duckdb_analytic import DuckDBAnalytic
 from src.pages import conversation, entry, learn_review, notebook_review, report_review, snapshot_review

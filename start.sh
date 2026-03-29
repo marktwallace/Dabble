@@ -20,6 +20,7 @@ mkdir -p "$HOME/logs"
 nohup uv run streamlit run app.py \
     --server.port "$PORT" \
     --server.baseUrlPath "$SERVER_BASE_URL_PATH" \
+    --server.headless true \
     >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
