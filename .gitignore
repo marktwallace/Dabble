@@ -182,6 +182,9 @@ conversations/*
 exports/
 uploads/
 .DS_Store
+.claude/
+.cursor/
+.ruff_cache/
 knowledge/
 reports/*
 !reports/.gitkeep
