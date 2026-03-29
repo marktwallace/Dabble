@@ -1,10 +1,14 @@
 import json
+import logging
 import os
 import re
+import time
 import traceback
 from pathlib import Path
 from textwrap import dedent
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 import numpy as np
@@ -257,7 +261,9 @@ class ClaudeHandler:
             else:
                 return f"Unknown tool: {name}"
         except Exception:
-            return traceback.format_exc()
+            tb = traceback.format_exc()
+            logger.error("Tool %s raised exception: %s", name, tb)
+            return tb
 
     def _run_sql(self, sql: str, dataframe_id: str) -> str:
         db = st.session_state.get("analytic_db")
@@ -265,6 +271,7 @@ class ClaudeHandler:
             return "Error: no analytic database configured."
         df, err = db.execute_query(sql)
         if err:
+            logger.debug("SQL error [%s]: %s", dataframe_id, err)
             return f"SQL error: {err}"
         if df is None or df.empty:
             return "Query returned no rows."
@@ -361,7 +368,11 @@ class ClaudeHandler:
         persisting the new messages to the conversation file.
         """
         system = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
+        round_trip = 0
+        t_start = time.monotonic()
         while True:
+            round_trip += 1
+            t0 = time.monotonic()
             response = self.client.messages.create(
                 model=self.model,
                 system=system,
@@ -369,21 +380,29 @@ class ClaudeHandler:
                 tools=self._tools(),
                 max_tokens=8096,
             )
+            elapsed = time.monotonic() - t0
             messages.append({
                 "role": "assistant",
                 "content": [b.model_dump() for b in response.content],
             })
             if response.stop_reason != "tool_use":
+                total = time.monotonic() - t_start
+                logger.info(
+                    "Claude done: %d round-trip(s), %.1fs total (last=%.1fs) stop=%s",
+                    round_trip, total, elapsed, response.stop_reason,
+                )
                 break
+            tool_calls = [b for b in response.content if b.type == "tool_use"]
+            tool_names = ", ".join(b.name for b in tool_calls)
+            logger.info("Round-trip %d: %.1fs — tools: %s", round_trip, elapsed, tool_names)
             tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    result = self._execute_tool(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
+            for block in tool_calls:
+                result = self._execute_tool(block.name, block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
             messages.append({"role": "user", "content": tool_results})
         return messages, response
 

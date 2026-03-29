@@ -1,8 +1,11 @@
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 
 class DuckDBAnalytic:
@@ -38,6 +41,8 @@ class DuckDBAnalytic:
         else:
             self._connect_local()
         self.cached_timestamp = self._query_timestamp()
+        if self.conn:
+            logger.info("Database ready: watermark=%s", self.cached_timestamp)
 
     def _db_name(self) -> str:
         name = os.environ.get("DABBLE_DB_NAME")
@@ -57,6 +62,7 @@ class DuckDBAnalytic:
             self._local_catalog_path = tmp.name
             tmp.close()
 
+        logger.info("Downloading catalog from s3://%s/%s/catalog.duckdb", bucket, prefix)
         s3.download_file(bucket, f"{prefix}/catalog.duckdb", self._local_catalog_path)
 
         if self.conn:
@@ -95,6 +101,7 @@ class DuckDBAnalytic:
         read_only = os.environ.get("DUCKDB_READ_ONLY", "").lower() in ("1", "true", "yes")
         if self.conn:
             self.conn.close()
+        logger.info("Connecting to local DuckDB file: %s (read_only=%s)", db_path, read_only)
         self.conn = duckdb.connect(db_path, read_only=read_only)
         self.conn.execute("SET TimeZone = 'UTC'")
 
@@ -105,6 +112,7 @@ class DuckDBAnalytic:
         parquet_data = _os.path.join(data_path, "data")
         if not _os.path.exists(catalog_path):
             raise FileNotFoundError(f"DuckLake catalog not found: {catalog_path}")
+        logger.info("Attaching local DuckLake catalog: %s", catalog_path)
         if self.conn:
             self.conn.close()
         self.conn = duckdb.connect()
@@ -127,6 +135,7 @@ class DuckDBAnalytic:
             raise RuntimeError(
                 f"DuckLake attached but contains no tables — catalog may be empty or corrupt: {catalog_path}"
             )
+        logger.info("Connected: %d tables visible", len(tables))
 
     # ------------------------------------------------------------------
     # Refresh (replaces hot-swap)
@@ -134,11 +143,13 @@ class DuckDBAnalytic:
 
     def refresh(self) -> bool:
         """Re-download catalog (S3 mode) or reconnect (local mode) and update timestamp."""
+        logger.info("Refreshing database connection")
         try:
             self._connect()
+            logger.info("Refresh complete: watermark=%s", self.cached_timestamp)
             return True
         except Exception as e:
-            print(f"Refresh failed: {e}")
+            logger.error("Refresh failed: %s", e)
             return False
 
     # ------------------------------------------------------------------
