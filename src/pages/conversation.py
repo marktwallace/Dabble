@@ -1,6 +1,7 @@
 import base64
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -127,7 +128,12 @@ def _init_session():
         st.session_state._active_path = path
         prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        now = datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
+        pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+        utc = datetime.now(ZoneInfo("UTC"))
+        now = (
+            f"{pt.strftime('%A, %B %-d, %Y, %-I:%M %p %Z')} (office); "
+            f"server is {utc.strftime('%-I:%M %p UTC')}"
+        )
         system_prompt = f"Current date and time: {now}\n\n" + system_prompt
         schema = _build_schema_context()
         if schema:
