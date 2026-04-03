@@ -1,5 +1,6 @@
 import base64
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -126,6 +127,8 @@ def _init_session():
         st.session_state._active_path = path
         prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
         system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        now = datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
+        system_prompt = f"Current date and time: {now}\n\n" + system_prompt
         schema = _build_schema_context()
         if schema:
             system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
