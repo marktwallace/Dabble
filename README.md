@@ -32,14 +32,12 @@ Claude inspects the file, creates a persistent table, and you begin exploring im
 
 ## Setup
 
-**Prerequisites:** conda (recommended — macOS system Python is unreliable across OS upgrades)
+**Prerequisites:** [uv](https://docs.astral.sh/uv/)
 
 ```bash
 git clone <repo_url>
-cd list-pet
-conda create -n dabble python=3.12
-conda activate dabble
-pip install -r requirements.txt
+cd dabble
+uv sync
 ```
 
 ```bash
@@ -57,12 +55,12 @@ cp .env.example .env
 | `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
 
 ```bash
-streamlit run app.py
+uv run streamlit run app.py
 ```
 
 ## Knowledge base tools
 
 ```bash
-python -m tools.seed_knowledge_base      # load knowledge/ into ChromaDB
-python -m tools.rebuild_knowledge_base   # clear and reload from knowledge/
+uv run python -m tools.seed_knowledge_base      # load knowledge/ into ChromaDB
+uv run python -m tools.rebuild_knowledge_base   # clear and reload from knowledge/
 ```

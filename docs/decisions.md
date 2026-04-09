@@ -24,15 +24,19 @@ This applies project-wide: prefer `os.environ["VAR"]` (KeyError on miss) or a gu
 
 ---
 
-## Knowledge base: proactive injection, not a tool
+## Knowledge base: registry injection + `recall_knowledge` tool
 
-An early version exposed `search_knowledge_base(query)` as a Claude tool. The idea is natural: Claude knows what the user asked, so let it decide when prior context is relevant.
+The KB design went through two iterations before reaching the current form.
 
-In practice this was wasteful. Claude called it reflexively on nearly every first turn — often getting back "knowledge base not configured" or results it didn't use. It also consumed a tool call turn before any analysis began, adding latency for no benefit.
+**v1 — proactive semantic search (abandoned):** The app called `search_knowledge_base(query)` before each tool loop turn and injected matching chunks. ChromaDB + sentence-transformers for embeddings. Problems: retrieval quality depended on cosine similarity (an unconditional proximity measure), required ML infrastructure, and the app had to pre-emptively decide what was relevant on every turn regardless of what Claude was actually doing.
 
-The current design removes the tool entirely. Instead, `get_kb_context(query)` is called by the app before handing off to the tool loop. Relevant chunks are injected into the system prompt for that turn. Claude gets the context without spending a turn fetching it, and the decision about when to search is made by the application, not by Claude.
+**v2 — registry + explicit tool call (current):** No vector database. Each chunk is a `.txt` file in `knowledge/`. At session start, `knowledge_base.py` scans the directory, reads the `description:` line from each file, and builds an `<available_knowledge>` block injected into the system prompt — one line per chunk (`slug: description`). Claude reads the registry and calls `recall_knowledge(chunk)` when it judges a chunk relevant. Routing is done by Claude's attention over the registry, conditioned on the actual query.
 
-This is a general principle: if the app can determine that context is always useful for a given type of request, inject it rather than teaching Claude to ask for it.
+This removes `chromadb`, `sentence-transformers`, `scikit-learn`, and `scipy` from dependencies. `numpy` stays (used by `run_python`). `boto3` stays (S3/DuckLake).
+
+The description line is now the routing function — it must be written to fire on the right queries and not fire on unrelated ones. The `/learn` extraction prompt instructs Claude to write it as "recall this when the user asks about ___."
+
+The tool call and its result appear in the conversation transcript, making KB retrieval auditable and visible to the analyst.
 
 ---
 
@@ -61,23 +65,13 @@ This also means the schema in Claude's context reflects the actual database at s
 
 ---
 
-## KB deduplication across turns
+## Handler is rebuilt on every conversation switch
 
-The knowledge base is searched before every question in a session. Without deduplication, the same chunks would be re-injected into the system prompt on every turn where the query happened to match them — accumulating repetitive noise and growing the prompt unnecessarily.
+`ClaudeHandler` is recreated each time `_active_path` changes — i.e., whenever the user opens a conversation (new or existing). This means the `<available_knowledge>` registry is always fresh: chunks saved via `/learn` in conversation N are visible to Claude in conversation N+1.
 
-`ClaudeHandler` maintains `_injected_chunk_ids: set[str]` for the lifetime of the session. Each chunk has a stable ID (an MD5 hash of its content). `get_kb_context()` filters out any chunk whose ID is already in the set before building the injection string, then records the new IDs. A chunk is injected at most once per session, on the first turn where it was retrieved.
+The handler holds no per-conversation state (all conversation state lives in `st.session_state.messages`, `dataframes`, etc.), so rebuilding it is safe. The cost is a filesystem scan of `knowledge/` and string concatenation — negligible.
 
-This keeps the system prompt stable across turns (which also benefits prompt caching — the cached system prompt isn't invalidated by new KB chunks after the first injection).
-
----
-
-## ChromaDB distance threshold
-
-ChromaDB returns results ranked by L2 distance. A small distance means the query embedding is close to the chunk embedding — high relevance. Without a threshold, even the most distant match in the collection is returned, which means a single irrelevant chunk can be injected as "context" just because it's the closest thing available.
-
-`DISTANCE_THRESHOLD = 1.0` in `src/knowledge_base.py` filters out chunks whose L2 distance exceeds this value. For normalised embeddings (which `text-embedding-3-small` produces), L2 distance of 1.0 corresponds roughly to cosine similarity of 0.5 — a moderate relevance floor. If the knowledge base has nothing genuinely relevant to a query, `search()` returns an empty list and nothing is injected.
-
-The threshold was set conservatively. If retrieval turns out to be too aggressive (injecting marginally relevant chunks), lower it; if useful chunks are being missed, raise it or inspect actual distances in a session.
+The one invariant that holds: chunks saved via `/learn` are not visible within the *current* conversation (the one where `/learn` was typed). The handler for that conversation was already built. This is acceptable — `/learn` is explicitly a "save for future sessions" operation.
 
 ## Conversation resumption: eager replay vs. lazy/on-demand
 
@@ -238,6 +232,18 @@ UTF-16 encoded files (e.g. Apple Music exports) are decoded after a UTF-8 attemp
 **Decision:** When writing the JSON sidecar, image content blocks are replaced with `{"type": "omitted"}`. The base64 payload is discarded.
 
 **Rationale:** The JSON sidecar exists to recover analytical state — charts, tables, and Claude's full message context for resumption. User-uploaded images do not need to be recoverable: they are large (significantly inflating the JSON file), and the analyst already has the original image. Omitting the base64 keeps the sidecar lean without losing anything meaningful.
+
+---
+
+## Knowledge base: `knowledge/` directory is the source of truth
+
+**Decision:** The `knowledge/` directory is authoritative. ChromaDB is a derived index that must always reflect exactly what the files contain — no more, no less.
+
+**Consequence:** Every save in `/learn` calls `remove_chunks_by_source()` to delete all existing ChromaDB entries for that source file before adding the newly selected chunks. This means re-running `/learn` on a conversation replaces its previous contribution to the KB, rather than accumulating on top of it.
+
+**Why this matters:** The two stores have different natural update semantics — files overwrite, ChromaDB only adds. Without the delete-before-add step, re-learning from the same conversation silently grows ChromaDB while the file only reflects the most recent selection. The file and the index diverge, and there is no way to audit what is actually retrievable short of querying ChromaDB directly.
+
+**Saving zero chunks is valid:** The Save button in the learn review screen is never disabled. Saving with nothing selected is a no-op — no files are written, and any previously saved files from earlier `/learn` runs on the same conversation remain unchanged. (In the old ChromaDB design this would have cleared entries for the source file; that is no longer relevant since files are never deleted by the save operation.)
 
 ---
 

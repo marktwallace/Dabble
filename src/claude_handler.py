@@ -1,10 +1,14 @@
 import json
+import logging
 import os
 import re
+import time
 import traceback
 from pathlib import Path
 from textwrap import dedent
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 import numpy as np
@@ -12,7 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from .chart_renderer import render_chart as _render_chart
-from .knowledge_base import search as kb_search
+from .knowledge_base import build_registry_block, delete_chunk, overwrite_chunk, read_chunk, write_chunk
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +34,10 @@ def df_summary(df: pd.DataFrame) -> str:
         series = df[col].dropna()
         if series.empty:
             lines.append(f"  {col}: all null")
+        elif pd.api.types.is_bool_dtype(df[col]):
+            counts = series.value_counts()
+            parts = ", ".join(f"{v} ({c})" for v, c in counts.items())
+            lines.append(f"  {col}: {parts}")
         elif pd.api.types.is_numeric_dtype(df[col]):
             lines.append(
                 f"  {col}: min={series.min():.4g}  max={series.max():.4g}  mean={series.mean():.4g}"
@@ -64,16 +72,12 @@ def df_summary(df: pd.DataFrame) -> str:
 # ---------------------------------------------------------------------------
 
 class ClaudeHandler:
-    def __init__(self, system_prompt: str, kb_path: Optional[str] = None):
-        self.system_prompt = system_prompt
-        self.kb_path = kb_path
-        self._injected_chunk_ids: set[str] = set()
+    def __init__(self, system_prompt: str, knowledge_dir: Optional[str] = None):
+        self.knowledge_dir = knowledge_dir
+        registry = build_registry_block(knowledge_dir) if knowledge_dir else ""
+        self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
-
-    def reset_kb_tracking(self) -> None:
-        """Clear injected-chunk tracking. Call when starting a new conversation."""
-        self._injected_chunk_ids.clear()
 
     # --- Tool definitions ---------------------------------------------------
 
@@ -151,6 +155,71 @@ class ClaudeHandler:
                 },
             },
             {
+                "name": "recall_knowledge",
+                "description": (
+                    "Retrieve a domain knowledge chunk by name. "
+                    "Call this when <available_knowledge> lists an entry relevant to your current task. "
+                    "Returns the full chunk content."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "chunk": {
+                            "type": "string",
+                            "description": "The chunk name from <available_knowledge> (e.g. 'qc-status-codes').",
+                        },
+                    },
+                    "required": ["chunk"],
+                },
+            },
+            {
+                "name": "update_knowledge",
+                "description": (
+                    "Create or overwrite a knowledge base chunk. "
+                    "Use this to save a new chunk, edit an existing one, or write a merged replacement. "
+                    "If updating an existing chunk, pass its slug from <available_knowledge>. "
+                    "If creating a new chunk, omit slug and one will be derived from the description. "
+                    "Changes take effect from the next conversation — tell the user this after saving."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "description": "Routing phrase completing 'recall this when the user asks about ___'. Be specific.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Full chunk content: SQL, data notes, join patterns, domain corrections, etc.",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "Chunk name to overwrite (from <available_knowledge>). Omit to create a new chunk.",
+                        },
+                    },
+                    "required": ["description", "content"],
+                },
+            },
+            {
+                "name": "delete_knowledge",
+                "description": (
+                    "Delete a knowledge base chunk by slug. "
+                    "Use after merging chunks or when a chunk is stale or incorrect. "
+                    "For bulk deletions (3 or more), list the slugs you plan to remove and "
+                    "wait for explicit user confirmation before calling this tool."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "slug": {
+                            "type": "string",
+                            "description": "The chunk slug to delete (from <available_knowledge>).",
+                        },
+                    },
+                    "required": ["slug"],
+                },
+            },
+            {
                 "name": "save_file",
                 "description": (
                     "Save a dataframe to a file. The file is placed in the exports/ directory "
@@ -183,10 +252,18 @@ class ClaudeHandler:
                 return self._run_python(inputs["dataframe_id"], inputs["code"], inputs.get("output_dataframe_id"))
             elif name == "save_file":
                 return self._save_file(inputs["dataframe_id"], inputs["filename"], inputs["format"])
+            elif name == "recall_knowledge":
+                return self._recall_knowledge(inputs["chunk"])
+            elif name == "update_knowledge":
+                return self._update_knowledge(inputs["description"], inputs["content"], inputs.get("slug"))
+            elif name == "delete_knowledge":
+                return self._delete_knowledge(inputs["slug"])
             else:
                 return f"Unknown tool: {name}"
         except Exception:
-            return traceback.format_exc()
+            tb = traceback.format_exc()
+            logger.error("Tool %s raised exception: %s", name, tb)
+            return tb
 
     def _run_sql(self, sql: str, dataframe_id: str) -> str:
         db = st.session_state.get("analytic_db")
@@ -194,6 +271,7 @@ class ClaudeHandler:
             return "Error: no analytic database configured."
         df, err = db.execute_query(sql)
         if err:
+            logger.debug("SQL error [%s]: %s", dataframe_id, err)
             return f"SQL error: {err}"
         if df is None or df.empty:
             return "Query returned no rows."
@@ -256,45 +334,45 @@ class ClaudeHandler:
         st.session_state.exported_files[filename] = path.read_bytes()
         return f"Saved {len(df)} rows to {path}"
 
-    def get_kb_context(self, query: str) -> tuple[str, list[dict]]:
-        """Search the knowledge base and return only chunks not yet injected this session.
+    def _recall_knowledge(self, chunk: str) -> str:
+        if not self.knowledge_dir:
+            return "Error: no knowledge directory configured."
+        return read_chunk(chunk, self.knowledge_dir)
 
-        Deduplicates by chunk ID so the same content is never injected twice,
-        keeping the system prompt stable across turns and preserving cache hits.
+    def _update_knowledge(self, description: str, content: str, slug: str | None) -> str:
+        if not self.knowledge_dir:
+            return "Error: no knowledge directory configured."
+        if slug:
+            overwrite_chunk(slug, description, content, self.knowledge_dir)
+            return f"Updated chunk '{slug}'. Takes effect from the next conversation."
+        else:
+            saved_slug = write_chunk(description, content, self.knowledge_dir)
+            return f"Saved new chunk '{saved_slug}'. Takes effect from the next conversation."
 
-        Returns (context_string, chunk_details) where chunk_details is a list of
-        dicts with 'description', 'distance', and 'content' — enough to persist
-        the full provenance record.
-        """
-        if not self.kb_path:
-            return "", []
-        chunks = kb_search(query, self.kb_path)
-        new_chunks = [c for c in chunks if c["id"] not in self._injected_chunk_ids]
-        for c in new_chunks:
-            self._injected_chunk_ids.add(c["id"])
-        if not new_chunks:
-            return "", []
-        context = "\n\n".join(f"[{i}] {c['description']}\n{c['content']}" for i, c in enumerate(new_chunks, 1))
-        details = [
-            {"description": c["description"], "similarity": c["similarity"], "content": c["content"]}
-            for c in new_chunks
-        ]
-        return context, details
+    def _delete_knowledge(self, slug: str) -> str:
+        if not self.knowledge_dir:
+            return "Error: no knowledge directory configured."
+        try:
+            delete_chunk(slug, self.knowledge_dir)
+            return f"Deleted chunk '{slug}'."
+        except FileNotFoundError:
+            return f"Error: no chunk named '{slug}'."
 
     # --- Tool loop -----------------------------------------------------------
 
-    def run_tool_loop(self, messages: list[dict], kb_context: str = "") -> tuple[list[dict], object]:
+    def run_tool_loop(self, messages: list[dict]) -> tuple[list[dict], object]:
         """Run the Claude tool loop until stop_reason is not 'tool_use'.
 
         Appends all new messages (assistant turns and tool results) to the
         messages list and also returns it. The caller is responsible for
         persisting the new messages to the conversation file.
         """
-        system_text = self.system_prompt
-        if kb_context:
-            system_text = system_text + "\n\n## Relevant context from knowledge base\n" + kb_context
-        system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
+        system = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
+        round_trip = 0
+        t_start = time.monotonic()
         while True:
+            round_trip += 1
+            t0 = time.monotonic()
             response = self.client.messages.create(
                 model=self.model,
                 system=system,
@@ -302,21 +380,29 @@ class ClaudeHandler:
                 tools=self._tools(),
                 max_tokens=8096,
             )
+            elapsed = time.monotonic() - t0
             messages.append({
                 "role": "assistant",
                 "content": [b.model_dump() for b in response.content],
             })
             if response.stop_reason != "tool_use":
+                total = time.monotonic() - t_start
+                logger.info(
+                    "Claude done: %d round-trip(s), %.1fs total (last=%.1fs) stop=%s",
+                    round_trip, total, elapsed, response.stop_reason,
+                )
                 break
+            tool_calls = [b for b in response.content if b.type == "tool_use"]
+            tool_names = ", ".join(b.name for b in tool_calls)
+            logger.info("Round-trip %d: %.1fs — tools: %s", round_trip, elapsed, tool_names)
             tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    result = self._execute_tool(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
+            for block in tool_calls:
+                result = self._execute_tool(block.name, block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
             messages.append({"role": "user", "content": tool_results})
         return messages, response
 
@@ -490,8 +576,9 @@ class ClaudeHandler:
             "iteration), key data shape observations, domain corrections, or schema/data quality "
             "discoveries. Prefer sequences that show *how to reason* in this domain over isolated facts.\n\n"
             "Return a JSON array. Each object must have:\n"
-            "  description: the question a future user would ask to find this chunk "
-            "(e.g. 'how to join runs with reportable calls' not 'sequencing run query patterns')\n"
+            "  description: a phrase completing 'recall this when the user asks about ___' — "
+            "specific enough to fire on the right queries and not on unrelated ones "
+            "(e.g. 'joining runs with reportable calls' not 'sequencing run query patterns')\n"
             "  content: full chunk text including SQL, data notes, and conclusions\n\n"
             "Return only valid JSON, no markdown fences.\n\n"
             "Conversation:\n\n" + conversation_text[:80000]
@@ -526,10 +613,11 @@ class ClaudeHandler:
         prompt = (
             f"You are indexing a reference document ({filename}) for a knowledge base "
             "used by future data analysis sessions.\n\n"
-            "For each segment below, write a description: the question a future user would ask "
-            "to find this information (used for semantic search).\n\n"
+            "For each segment below, write a description: a phrase completing "
+            "'recall this when the user asks about ___' — specific enough to fire on "
+            "the right queries and not on unrelated ones.\n\n"
             "Return a JSON array where each object has:\n"
-            "  description: user question that would retrieve this chunk\n"
+            "  description: routing phrase for this chunk\n"
             "  content: the segment text verbatim\n\n"
             "Return only valid JSON, no markdown fences.\n\n"
             + segments_text[:60000]

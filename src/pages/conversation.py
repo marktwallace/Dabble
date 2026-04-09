@@ -1,15 +1,18 @@
 import base64
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from .. import conversation_file as conv_file
 from ..claude_handler import ClaudeHandler
-from ..knowledge_base import diagnostics as kb_diagnostics
+from ..knowledge_base import list_registry
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
-KB_PATH = os.environ.get("KB_PATH")
+KNOWLEDGE_DIR = os.environ.get("KNOWLEDGE_DIR", "knowledge")
 UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
 
 
@@ -120,18 +123,22 @@ def _init_session():
     if "upload_counter" not in st.session_state:
         st.session_state.upload_counter = 0
 
-    if "handler" not in st.session_state:
-        prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
-        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        schema = _build_schema_context()
-        if schema:
-            system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
-        st.session_state.handler = ClaudeHandler(system_prompt, KB_PATH)
-
     path = st.session_state.get("conversation_path")
     if st.session_state.get("_active_path") != path:
         st.session_state._active_path = path
-        st.session_state.handler.reset_kb_tracking()
+        prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
+        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+        utc = datetime.now(ZoneInfo("UTC"))
+        now = (
+            f"{pt.strftime('%A, %B %-d, %Y, %-I:%M %p %Z')} (office); "
+            f"server is {utc.strftime('%-I:%M %p UTC')}"
+        )
+        system_prompt = f"Current date and time: {now}\n\n" + system_prompt
+        schema = _build_schema_context()
+        if schema:
+            system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
+        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR)
         st.session_state.dataframes = {}
         st.session_state.figures = {}
         st.session_state.artifact_order = []
@@ -140,9 +147,7 @@ def _init_session():
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
-        if saved and path:
-            _attach_kb_contexts(st.session_state.turns, path)
-            _replay_tool_calls(saved, st.session_state.handler)
+        _replay_tool_calls(saved, st.session_state.handler)
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +202,9 @@ def _build_file_message(attachment: dict) -> str:
 
 _COMMANDS_HELP = (
     "**Available commands:**\n"
-    "- `/learn` — save useful patterns to the knowledge base\n"
-    "- `/kb` — show how the knowledge base matches a query\n"
+    "- `/learn` — save useful patterns from this conversation to the knowledge base\n"
+    "- `/kb` — list what's in the knowledge base\n"
+    "- `/refresh` — reload the database (picks up latest ETL run)\n"
     "- `/snapshot` — generate a static shareable chart or table\n"
     "- `/report` — generate a live parameterized Streamlit report\n"
     "- `/notebook` — generate an editable Marimo notebook\n\n"
@@ -206,7 +212,7 @@ _COMMANDS_HELP = (
     "Not sure where to start? Try: *\"Give me an overview of the data.\"*"
 )
 
-_KNOWN_COMMANDS = {"/learn", "/kb", "/snapshot", "/report", "/notebook"}
+_KNOWN_COMMANDS = {"/learn", "/kb", "/snapshot", "/report", "/notebook", "/refresh"}
 
 
 def _enqueue_input(text, attachment=None):
@@ -214,7 +220,7 @@ def _enqueue_input(text, attachment=None):
         _handle_learn(attachment)
         return
     if text.startswith("/kb"):
-        _handle_kb(text)
+        _handle_kb()
         return
     if text == "/snapshot":
         _handle_snapshot()
@@ -224,6 +230,9 @@ def _enqueue_input(text, attachment=None):
         return
     if text == "/notebook":
         _handle_notebook()
+        return
+    if text == "/refresh":
+        _handle_refresh()
         return
     if text.startswith("/") and text.split()[0] not in _KNOWN_COMMANDS:
         st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
@@ -270,9 +279,7 @@ def _run_agent(text):
     st.session_state.tables_to_show = []
 
     with st.spinner("working..."):
-        kb_context, kb_descriptions = handler.get_kb_context(text)
-        conv_file.append_kb_context(path, kb_descriptions)
-        messages, _response = handler.run_tool_loop(st.session_state.messages, kb_context=kb_context)
+        messages, _response = handler.run_tool_loop(st.session_state.messages)
 
     st.session_state.messages = messages
     new_messages = messages[prev_len:]
@@ -286,9 +293,7 @@ def _run_agent(text):
     _write_new_messages(path, new_messages)
     conv_file.save_messages(path, messages)
 
-    for i, turn in enumerate(_extract_assistant_turns(new_messages)):
-        if i == 0:
-            turn["kb_descriptions"] = kb_descriptions  # attach to first turn for display
+    for turn in _extract_assistant_turns(new_messages):
         st.session_state.turns.append(turn)
 
 
@@ -308,56 +313,43 @@ def _handle_learn(attachment=None):
     st.rerun()
 
 
-def _handle_kb(text):
-    query = text[len("/kb"):].strip()
-    if not query:
-        # Use the last user message as the query
-        user_turns = [t for t in st.session_state.turns if t["role"] == "user"]
-        if user_turns:
-            query = user_turns[-1]["text"]
-        else:
-            st.session_state.turns.append({"role": "user", "text": "/kb", "tool_calls": []})
-            st.session_state.turns.append({
-                "role": "assistant",
-                "text": "No previous message to match against. Try `/kb your query here`.",
-                "tool_calls": [],
-            })
-            st.rerun()
-            return
-
-    if not KB_PATH:
-        st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
-        st.session_state.turns.append({
-            "role": "assistant",
-            "text": "Knowledge base not configured (`KB_PATH` not set).",
-            "tool_calls": [],
-        })
-        st.rerun()
-        return
-
-    result = kb_diagnostics(query, KB_PATH)
-    lines = [
-        f"**Knowledge base:** {result['total_chunks']} chunk(s), "
-        f"similarity threshold = {result['threshold']}\n",
-        f"**Query:** {query}\n",
-    ]
-    if result["matches"]:
-        lines.append("| Similarity | Retrieved? | Source | Description |")
-        lines.append("|---:|:---:|:---|:---|")
-        for m in result["matches"]:
-            check = "yes" if m["would_retrieve"] else "no"
-            lines.append(
-                f"| {m['similarity']:.3f} | {check} | {m['source']} | {m['description']} |"
-            )
+def _handle_kb():
+    entries = list_registry(KNOWLEDGE_DIR)
+    st.session_state.turns.append({"role": "user", "text": "/kb", "tool_calls": []})
+    if entries:
+        hint = "_Ask Claude to update, merge, or delete any of these — or ask for a full cleanup pass. Tip: chunks with a shared slug prefix (e.g. `run-joining-*`) sort together alphabetically._"
     else:
-        lines.append("_Knowledge base is empty._")
-
-    st.session_state.turns.append({"role": "user", "text": text, "tool_calls": []})
+        hint = "_Knowledge base is empty. Use /learn after a productive conversation to start building it._"
     st.session_state.turns.append({
         "role": "assistant",
-        "text": "\n".join(lines),
+        "text": f"**Knowledge base:** {len(entries)} chunk(s)\n\n{hint}",
         "tool_calls": [],
+        "kb_entries": entries,
     })
+    st.rerun()
+
+
+def _handle_refresh():
+    db = st.session_state.get("analytic_db")
+    st.session_state.turns.append({"role": "user", "text": "/refresh", "tool_calls": []})
+    if not db:
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": "No database connection to refresh.",
+            "tool_calls": [],
+        })
+    elif db.refresh():
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": f"Database refreshed. Data as of: {db.get_timestamp()}",
+            "tool_calls": [],
+        })
+    else:
+        st.session_state.turns.append({
+            "role": "assistant",
+            "text": "Refresh failed — check logs for details.",
+            "tool_calls": [],
+        })
     st.rerun()
 
 
@@ -481,15 +473,6 @@ def _messages_to_turns(messages: list[dict]) -> list[dict]:
     return turns
 
 
-def _attach_kb_contexts(turns: list[dict], path: str) -> None:
-    """Attach persisted kb_context blocks to their corresponding assistant turns."""
-    blocks = conv_file.parse_kb_contexts(path)
-    assistant_turns = [t for t in turns if t["role"] == "assistant"]
-    for i, kb_descs in enumerate(blocks):
-        if i < len(assistant_turns):
-            assistant_turns[i]["kb_descriptions"] = kb_descs
-
-
 def _extract_assistant_turns(new_messages):
     turns = []
     i = 0
@@ -537,18 +520,19 @@ def _extract_assistant_turns(new_messages):
 # ---------------------------------------------------------------------------
 
 def _render_assistant_turn(turn, turn_idx, is_latest):
-    kb_chunks = turn.get("kb_descriptions")
-    if kb_chunks is not None:
-        label = f"📚 {len(kb_chunks)} knowledge chunk(s) retrieved" if kb_chunks else "📚 No knowledge retrieved"
-        with st.expander(label, expanded=False):
-            if kb_chunks:
-                for chunk in kb_chunks:
-                    st.markdown(f"**{chunk['similarity']:.3f}** — {chunk['description']}")
-                    if chunk.get("content"):
-                        st.code(chunk["content"], language=None)
-                st.caption("Cosine similarity: 1.0 = identical, 0.0 = unrelated")
-            else:
-                st.markdown("_Nothing matched in the knowledge base for this query._")
+
+    if "kb_entries" in turn and turn["kb_entries"]:
+        df = pd.DataFrame(turn["kb_entries"])[["slug", "description", "date"]]
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "slug": st.column_config.TextColumn("Chunk", width="medium"),
+                "description": st.column_config.TextColumn("Description", width="large"),
+                "date": st.column_config.TextColumn("Saved", width="small"),
+            },
+        )
 
     for tc in turn["tool_calls"]:
         with st.expander(_expander_label(tc["name"], tc["inputs"]), expanded=is_latest):

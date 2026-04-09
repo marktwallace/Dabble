@@ -1,9 +1,17 @@
+import logging
 import os
 
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    force=True,
+)
 
 from src.duckdb_analytic import DuckDBAnalytic
 from src.pages import conversation, entry, learn_review, notebook_review, report_review, snapshot_review
@@ -13,9 +21,8 @@ def main():
     st.set_page_config(page_title="Dabble", layout="wide")
 
     if "analytic_db" not in st.session_state:
-        db_path = os.environ.get("DUCKDB_ANALYTIC_FILE")
-        if db_path:
-            st.session_state.analytic_db = DuckDBAnalytic(db_path)
+        if os.environ.get("DABBLE_S3_BUCKET") or os.environ.get("DABBLE_DATA_PATH") or os.environ.get("DUCKDB_ANALYTIC_FILE"):
+            st.session_state.analytic_db = DuckDBAnalytic()
 
     if "page" not in st.session_state:
         st.session_state.page = "entry"
