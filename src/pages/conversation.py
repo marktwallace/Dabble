@@ -86,7 +86,7 @@ def _replay_tool_calls(messages: list[dict], handler) -> None:
         if msg["role"] != "assistant":
             continue
         for block in msg["content"]:
-            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart", "save_file"):
+            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart", "save_file", "show_table"):
                 handler._execute_tool(block["name"], block["input"])
 
 
@@ -143,6 +143,7 @@ def _init_session():
         st.session_state.figures = {}
         st.session_state.artifact_order = []
         st.session_state.tables_to_show = []
+        st.session_state.shown_dataframes = set()
         st.session_state.exported_files = {}
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
