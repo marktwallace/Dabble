@@ -67,6 +67,8 @@ def df_summary(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+MAX_STORED_DATAFRAMES = 10
+
 # ---------------------------------------------------------------------------
 # ClaudeHandler
 # ---------------------------------------------------------------------------
@@ -277,13 +279,34 @@ class ClaudeHandler:
             return "Query returned no rows."
         st.session_state.dataframes[dataframe_id] = df
         st.session_state.artifact_order.append(("dataframe", dataframe_id))
+        self._evict_dataframes()
         return df_summary(df)
 
     def _show_table(self, dataframe_id: str) -> str:
         if dataframe_id not in st.session_state.dataframes:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
+        st.session_state.shown_dataframes.add(dataframe_id)
         st.session_state.tables_to_show.append(dataframe_id)
         return "Displayed to user."
+
+    def _evict_dataframes(self) -> None:
+        """Evict oldest DataFrames once the store exceeds MAX_STORED_DATAFRAMES.
+
+        DataFrames marked as shown via show_table are protected — evicting them
+        would break table display when the user scrolls up. Only intermediate
+        DataFrames (used as chart/python inputs but never directly shown) are
+        candidates for eviction.
+        """
+        if len(st.session_state.dataframes) <= MAX_STORED_DATAFRAMES:
+            return
+        protected = st.session_state.get("shown_dataframes", set())
+        ordered_ids = list(dict.fromkeys(
+            aid for kind, aid in st.session_state.artifact_order if kind == "dataframe"
+        ))
+        evict_candidates = [i for i in ordered_ids if i not in protected]
+        n_to_evict = len(st.session_state.dataframes) - MAX_STORED_DATAFRAMES
+        for eid in evict_candidates[:n_to_evict]:
+            st.session_state.dataframes.pop(eid, None)
 
     def _render_chart(self, dataframe_id: str, code: str, chart_id: str | None) -> str:
         df = st.session_state.dataframes.get(dataframe_id)
