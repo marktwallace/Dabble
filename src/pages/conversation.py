@@ -149,6 +149,12 @@ def _init_session():
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
         _replay_tool_calls(saved, st.session_state.handler)
+        if not st.session_state.turns:
+            welcome_path = Path(PROMPTS_DIR) / "welcome_message.txt"
+            if welcome_path.exists():
+                welcome_text = welcome_path.read_text(encoding="utf-8").strip()
+                if welcome_text:
+                    st.session_state.turns.append({"role": "assistant", "text": welcome_text, "tool_calls": []})
 
 
 # ---------------------------------------------------------------------------
