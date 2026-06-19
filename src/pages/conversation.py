@@ -1,5 +1,6 @@
 import base64
 import os
+import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -38,9 +39,16 @@ def render():
                 _render_assistant_turn(turn, turn_idx=i, is_latest=(i == n - 1))
 
     if st.session_state.get("pending_input"):
-        _run_agent(st.session_state.pending_input)
-        st.session_state.pending_input = None
-        st.rerun()
+        lock = st.session_state._run_lock
+        if lock.acquire(blocking=False):
+            try:
+                pending = st.session_state.pending_input
+                st.session_state.pending_input = None  # clear before running
+                _run_agent(pending)
+            finally:
+                lock.release()
+            st.rerun()
+        # else: a run is already in flight; pending_input waits for the next rerun.
 
     uploader_key = f"uploader_{st.session_state.upload_counter}"
     with st.popover("📎"):
@@ -145,6 +153,8 @@ def _init_session():
         st.session_state.tables_to_show = []
         st.session_state.shown_dataframes = set()
         st.session_state.exported_files = {}
+        # Guards _run_agent against concurrent script runs interleaving messages.
+        st.session_state._run_lock = threading.Lock()
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
