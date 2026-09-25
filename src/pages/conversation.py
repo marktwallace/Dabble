@@ -15,6 +15,7 @@ from ..knowledge_base import list_registry
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
 KNOWLEDGE_DIR = os.environ.get("KNOWLEDGE_DIR", "knowledge")
 UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
+INSTANCE_CONTEXT = os.environ.get("INSTANCE_CONTEXT", "").strip()
 
 
 def render():
@@ -142,6 +143,8 @@ def _init_session():
             f"{pt.strftime('%A, %B %-d, %Y, %-I:%M %p %Z')} (office); "
             f"server is {utc.strftime('%-I:%M %p UTC')}"
         )
+        if INSTANCE_CONTEXT:
+            system_prompt = INSTANCE_CONTEXT + "\n\n" + system_prompt
         system_prompt = f"Current date and time: {now}\n\n" + system_prompt
         schema = _build_schema_context()
         if schema:

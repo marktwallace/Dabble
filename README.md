@@ -53,6 +53,7 @@ cp .env.example .env
 | `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
 | `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
 | `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
+| `INSTANCE_CONTEXT` | No | Text added to the system prompt after the date line — e.g. which environment's data this instance reads |
 
 ```bash
 uv run streamlit run app.py
