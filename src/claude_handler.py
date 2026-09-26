@@ -69,6 +69,20 @@ def df_summary(df: pd.DataFrame) -> str:
 
 MAX_STORED_DATAFRAMES = 10
 
+# Room for thinking as well as the reply. On models that always think (Opus 5.5,
+# Fable 5.1), thinking counts toward max_tokens even when its text isn't returned,
+# so a limit sized for the reply alone cuts the reply off.
+MAX_TOKENS = 16000
+
+
+def response_text(response) -> str:
+    """The text of a response, read by block type.
+
+    A response can begin with thinking blocks, so content[0] is not
+    necessarily text.
+    """
+    return "".join(b.text for b in response.content if b.type == "text")
+
 # ---------------------------------------------------------------------------
 # ClaudeHandler
 # ---------------------------------------------------------------------------
@@ -80,6 +94,23 @@ class ClaudeHandler:
         self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+        # Both optional; unset, requests are exactly as before.
+        # CLAUDE_EFFORT: low / medium / high / xhigh / max.
+        self.effort = os.environ.get("CLAUDE_EFFORT", "").strip()
+        # CLAUDE_THINKING_BLOCK_BINDING: drop_block or error. Only for models that
+        # tie thinking blocks to the conversation that produced them (Opus 5.5,
+        # Fable 5.1). A resumed conversation runs under a rebuilt system prompt,
+        # so its earlier thinking blocks no longer match; drop_block has the API
+        # drop them instead of rejecting the request. Setting this also sends
+        # adaptive thinking, which those models run regardless.
+        self.block_binding = os.environ.get("CLAUDE_THINKING_BLOCK_BINDING", "").strip()
+
+    def _request_options(self) -> dict:
+        """Optional request fields set from the environment."""
+        opts = {}
+        if self.effort:
+            opts["output_config"] = {"effort": self.effort}
+        return opts
 
     # --- Tool definitions ---------------------------------------------------
 
@@ -396,14 +427,39 @@ class ClaudeHandler:
         while True:
             round_trip += 1
             t0 = time.monotonic()
-            response = self.client.messages.create(
+            request = dict(
                 model=self.model,
                 system=system,
                 messages=messages,
                 tools=self._tools(),
-                max_tokens=8096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
             )
+            if self.block_binding:
+                response = self.client.beta.messages.create(
+                    **request,
+                    thinking={
+                        "type": "adaptive",
+                        "block_binding": {"prefix_mismatch_behavior": self.block_binding},
+                    },
+                    betas=["thinking-binding-controls-2026-08-01"],
+                )
+                dropped = getattr(response, "input_transformations", None)
+                if dropped:
+                    logger.info("Thinking blocks dropped by the API: %s", dropped)
+            else:
+                response = self.client.messages.create(**request)
             elapsed = time.monotonic() - t0
+            if response.stop_reason == "refusal":
+                # Declined by a safety classifier or by the model. Content is
+                # empty or partial, so it is not appended: an empty assistant
+                # turn would make the next request invalid. The caller shows
+                # the refusal from response.stop_details.
+                logger.warning(
+                    "Claude refused after %d round-trip(s): %s",
+                    round_trip, getattr(response, "stop_details", None),
+                )
+                break
             messages.append({
                 "role": "assistant",
                 "content": [b.model_dump() for b in response.content],
@@ -436,14 +492,15 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=60,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": (
                     "Generate a short title (max 60 chars) for a data analysis conversation "
                     "that starts with this message. No quotes, no punctuation at the end.\n\n"
                     + user_message[:400]
                 )}],
             )
-            return response.content[0].text.strip()[:60]
+            return response_text(response).strip()[:60]
         except Exception:
             return "Untitled conversation"
 
@@ -499,10 +556,11 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text.strip()
+            text = response_text(response).strip()
             summary_match = re.search(r"<summary>(.*?)</summary>", text, re.DOTALL)
             code_match = re.search(r"<code>(.*?)</code>", text, re.DOTALL)
             if not summary_match or not code_match:
@@ -545,10 +603,11 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text.strip()
+            text = response_text(response).strip()
             title_match = re.search(r"<title>(.*?)</title>", text, re.DOTALL)
             code_match = re.search(r"<code>(.*?)</code>", text, re.DOTALL)
             if not code_match:
@@ -576,10 +635,11 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text.strip()
+            text = response_text(response).strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             return text
@@ -609,10 +669,11 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text.strip()
+            text = response_text(response).strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             return json.loads(text)
@@ -648,10 +709,11 @@ class ClaudeHandler:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                **self._request_options(),
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text.strip()
+            text = response_text(response).strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             chunks = json.loads(text)

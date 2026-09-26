@@ -53,6 +53,8 @@ cp .env.example .env
 | `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
 | `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
 | `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
+| `CLAUDE_EFFORT` | No | Effort level sent with every request (`low`, `medium`, `high`, `xhigh`, `max`); unset uses the model's default |
+| `CLAUDE_THINKING_BLOCK_BINDING` | No | `drop_block` or `error`. For models that tie thinking blocks to their conversation: what the API does with earlier thinking blocks a resumed conversation no longer matches |
 | `INSTANCE_CONTEXT` | No | Text added to the system prompt after the date line — e.g. which environment's data this instance reads |
 
 ```bash

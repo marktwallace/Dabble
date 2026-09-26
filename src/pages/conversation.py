@@ -316,6 +316,21 @@ def _run_agent(text):
     for turn in _extract_assistant_turns(new_messages):
         st.session_state.turns.append(turn)
 
+    if getattr(_response, "stop_reason", None) == "refusal":
+        # Shown, not stored: the refused turn is kept out of the messages sent
+        # back to the model, so this notice exists only in the UI.
+        details = getattr(_response, "stop_details", None)
+        category = getattr(details, "category", None) if details else None
+        st.session_state.turns.append({
+            "role": "assistant",
+            "tool_calls": [],
+            "text": (
+                "The model declined this request"
+                + (f" (category: {category})" if category else "")
+                + ". Try rephrasing it, or ask it a different way."
+            ),
+        })
+
 
 def _handle_learn(attachment=None):
     path = st.session_state.conversation_path
