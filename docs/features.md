@@ -38,7 +38,7 @@ Below the conversation list, two sections: **Reports** (live, parameterized) and
 
 ### 2. Conversational Analysis
 
-A chat interface backed by Claude (claude-sonnet-4-6). The full tool loop runs synchronously before Streamlit rerenders — no queue, no multi-rerun machinery, no intermediate buttons to advance the state.
+A chat interface backed by Claude, on the model set by `CLAUDE_MODEL`. The full tool loop runs synchronously before Streamlit rerenders — no queue, no multi-rerun machinery, no intermediate buttons to advance the state.
 
 **UI layout — conversation view:**
 
@@ -275,7 +275,7 @@ domain corrections, join patterns, etc.
 
 **No sidebar conversation list.** Moved to entry screen.
 
-**LLM:** Anthropic SDK, claude-sonnet-4-6. Synchronous (non-streaming) tool loop for v1.
+**LLM:** Anthropic SDK, model set by `CLAUDE_MODEL`. Synchronous (non-streaming) tool loop for v1.
 
 **Analytic data:** DuckDB, read-only. Path via environment variable.
 

@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from .. import conversation_file as conv_file
-from ..claude_handler import ClaudeHandler
+from ..claude_handler import ClaudeHandler, configured_model
 from ..knowledge_base import list_registry
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
@@ -145,7 +145,9 @@ def _init_session():
         )
         if INSTANCE_CONTEXT:
             system_prompt = INSTANCE_CONTEXT + "\n\n" + system_prompt
-        system_prompt = f"Current date and time: {now}\n\n" + system_prompt
+        effort = os.environ.get("CLAUDE_EFFORT", "").strip()
+        model_line = f"Model: {configured_model()}" + (f", effort {effort}" if effort else "")
+        system_prompt = f"Current date and time: {now}\n{model_line}\n\n" + system_prompt
         schema = _build_schema_context()
         if schema:
             system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema

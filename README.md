@@ -47,6 +47,7 @@ cp .env.example .env
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `CLAUDE_MODEL` | Yes | Model every request uses (e.g. `claude-opus-5-5`); also named to the model in its system prompt |
 | `OPENAI_API_KEY` | Yes | ChromaDB embeddings (text-embedding-3-small) |
 | `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created on first run if absent) |
 | `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory |

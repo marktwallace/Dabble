@@ -75,6 +75,14 @@ MAX_STORED_DATAFRAMES = 10
 MAX_TOKENS = 16000
 
 
+def configured_model() -> str:
+    """The model every request uses. CLAUDE_MODEL is required; there is no default."""
+    model = os.environ.get("CLAUDE_MODEL", "").strip()
+    if not model:
+        raise RuntimeError("CLAUDE_MODEL is not set. Set it in .env to the model this instance uses.")
+    return model
+
+
 def response_text(response) -> str:
     """The text of a response, read by block type.
 
@@ -93,7 +101,7 @@ class ClaudeHandler:
         registry = build_registry_block(knowledge_dir) if knowledge_dir else ""
         self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        self.model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+        self.model = configured_model()
         # Both optional; unset, requests are exactly as before.
         # CLAUDE_EFFORT: low / medium / high / xhigh / max.
         self.effort = os.environ.get("CLAUDE_EFFORT", "").strip()
