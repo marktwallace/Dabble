@@ -128,6 +128,8 @@ class ClaudeHandler:
                 "name": "run_sql",
                 "description": (
                     "Execute a DuckDB SQL query. Stores the full result as a named dataframe in session memory. "
+                    "Stored dataframes are available to show_table, render_chart, and run_python, not to later "
+                    "run_sql queries; to build on a result in SQL, repeat its query as a CTE. "
                     "Returns a text summary (row count, per-column stats, sample rows) so you can reason about the data. "
                     "Always call this before render_chart or run_python."
                 ),
@@ -161,6 +163,8 @@ class ClaudeHandler:
                     "The full dataframe is available as 'df'. "
                     "Use plotly.graph_objects (go) or plotly.express (px) — both are available. "
                     "Assign a go.Figure to 'fig'. "
+                    "Charts are shown in the app's theme (dark), so leave colors unset unless the user "
+                    "asks for a particular look. "
                     "If the tool returns an error, analyse it and retry with corrected code. "
                     "You can call this multiple times to iterate on a chart without re-querying."
                 ),
