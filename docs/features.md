@@ -10,7 +10,7 @@ The architecture is intentionally simple. Its value is in giving Claude a set of
 
 **Bootstrap mode** — point at a new DuckDB file, import a CSV, start exploring. Domain knowledge accumulates over time via `/learn`. This is the fastest path to a working session and requires no upfront configuration.
 
-**Domain overlay mode** — a separate (typically private) repository provides a system prompt, knowledge base seed content, and a pre-populated DuckDB file. The overlay is wired to Dabble via `.env`. Dabble knows nothing about any specific domain; the overlay is what makes it accurate for a given context. A production overlay system prompt may be large — covering schema documentation, data quality quirks, join patterns, and analytical conventions — and can run to tens of thousands of tokens. The DuckDB file and ChromaDB directory live with the overlay, not in this repository, and are not under source control.
+**Domain overlay mode** — a separate (typically private) repository provides a system prompt, knowledge base seed content, and a pre-populated DuckDB file. The overlay is wired to Dabble via `.env`. Dabble knows nothing about any specific domain; the overlay is what makes it accurate for a given context. A production overlay system prompt may be large — covering schema documentation, data quality quirks, join patterns, and analytical conventions — and can run to tens of thousands of tokens. The DuckDB file and knowledge directory live with the overlay, not in this repository, and are not under source control.
 
 ---
 
@@ -311,6 +311,8 @@ domain corrections, join patterns, etc.
 ---
 
 ## Implementation Strategy
+
+*The v2 build plan as written. The knowledge base it describes (ChromaDB, `src/knowledge_base.py` as a search wrapper, the `tools/` seed scripts) was replaced by the registry design — see `docs/decisions.md`, "Knowledge base: registry injection + `recall_knowledge` tool".*
 
 ### Start from scratch
 

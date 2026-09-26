@@ -122,7 +122,7 @@ def _build_schema_context() -> str:
 
 render_chart namespace: df (the dataframe), go (plotly.graph_objects), px (plotly.express), pd (pandas), np (numpy). Must assign a go.Figure to 'fig'.
 
-run_python namespace: df (the input dataframe), pd (pandas), np (numpy). You can import any installed package. Installed packages: anthropic, chromadb, duckdb, numpy, openai, openpyxl, pandas, plotly, scikit-learn, scipy, streamlit.
+run_python namespace: df (the input dataframe), pd (pandas), np (numpy). You can import any installed package. Installed packages: anthropic, boto3, duckdb, numpy, openpyxl, pandas, plotly, python-dotenv, streamlit.
 
 To save a dataframe as a downloadable file, use the save_file tool.""")
     return "\n".join(lines)

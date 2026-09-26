@@ -237,13 +237,9 @@ UTF-16 encoded files (e.g. Apple Music exports) are decoded after a UTF-8 attemp
 
 ## Knowledge base: `knowledge/` directory is the source of truth
 
-**Decision:** The `knowledge/` directory is authoritative. ChromaDB is a derived index that must always reflect exactly what the files contain — no more, no less.
+**Decision:** The `knowledge/` directory is the knowledge base — there is no index or second store. What the files contain is exactly what the registry lists and `recall_knowledge` returns, so auditing the knowledge base means reading the directory.
 
-**Consequence:** Every save in `/learn` calls `remove_chunks_by_source()` to delete all existing ChromaDB entries for that source file before adding the newly selected chunks. This means re-running `/learn` on a conversation replaces its previous contribution to the KB, rather than accumulating on top of it.
-
-**Why this matters:** The two stores have different natural update semantics — files overwrite, ChromaDB only adds. Without the delete-before-add step, re-learning from the same conversation silently grows ChromaDB while the file only reflects the most recent selection. The file and the index diverge, and there is no way to audit what is actually retrievable short of querying ChromaDB directly.
-
-**Saving zero chunks is valid:** The Save button in the learn review screen is never disabled. Saving with nothing selected is a no-op — no files are written, and any previously saved files from earlier `/learn` runs on the same conversation remain unchanged. (In the old ChromaDB design this would have cleared entries for the source file; that is no longer relevant since files are never deleted by the save operation.)
+**Saving zero chunks is valid:** The Save button in the learn review screen is never disabled. Saving with nothing selected is a no-op — no files are written, and any previously saved files from earlier `/learn` runs on the same conversation remain unchanged.
 
 ---
 

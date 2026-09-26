@@ -2,7 +2,7 @@
 
 A conversational data analysis tool built on Claude's native tool loop. You ask questions in plain English; it queries DuckDB, renders Plotly charts, and produces shareable outputs.
 
-The tool surface is deliberately small: five tools — `run_sql`, `show_table`, `render_chart`, `run_python`, `search_knowledge_base` — that form a complete analytical loop. Claude isn't writing arbitrary code; it's operating a coherent set of instruments. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results.
+The tool surface is deliberately small: `run_sql`, `show_table`, `render_chart`, `run_python` and `save_file` form a complete analytical loop, and `recall_knowledge`, `update_knowledge` and `delete_knowledge` read and curate the knowledge base. Claude isn't writing arbitrary code; it's operating a coherent set of instruments. When `render_chart` returns a traceback, Claude reads it, fixes the code, and retries without the user seeing it. When a SQL query returns unexpected nulls, Claude investigates before reporting results.
 
 DuckDB is not an incidental choice. It is fast, embedded, and SQL-native — Claude can query CSV files, Parquet, or a persistent database file with nothing between it and the data. The query-result-iterate loop runs in milliseconds.
 
@@ -18,7 +18,7 @@ Every session can produce shareable artifacts directly from the conversation:
 
 ## Knowledge base
 
-`/learn` extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it to ChromaDB. Future sessions retrieve this context via semantic search before each question. Domain knowledge accumulates from real sessions rather than being pre-authored.
+`/learn` extracts analytical sequences from a conversation — the SQL that worked, the iteration that got there, the domain correction that made results correct — and lets you approve each chunk before saving it as a `.txt` file in `knowledge/`. Each session's system prompt lists every chunk's description, and Claude calls `recall_knowledge` to read the ones that bear on the question. Domain knowledge accumulates from real sessions rather than being pre-authored.
 
 ## Getting started
 
@@ -48,9 +48,7 @@ cp .env.example .env
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
 | `CLAUDE_MODEL` | Yes | Model every request uses (e.g. `claude-opus-5-5`); also named to the model in its system prompt |
-| `OPENAI_API_KEY` | Yes | ChromaDB embeddings (text-embedding-3-small) |
 | `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created on first run if absent) |
-| `KB_PATH` | Yes | Path for the ChromaDB knowledge base directory |
 | `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
 | `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
 | `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
@@ -60,11 +58,4 @@ cp .env.example .env
 
 ```bash
 uv run streamlit run app.py
-```
-
-## Knowledge base tools
-
-```bash
-uv run python -m tools.seed_knowledge_base      # load knowledge/ into ChromaDB
-uv run python -m tools.rebuild_knowledge_base   # clear and reload from knowledge/
 ```
