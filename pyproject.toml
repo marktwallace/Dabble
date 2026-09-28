@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.8,<2",
     "boto3",
-    "duckdb==1.5.1",
+    "duckdb==1.5.5",
     "numpy",
     "openpyxl",
     "pandas",
