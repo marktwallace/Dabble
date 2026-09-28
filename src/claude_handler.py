@@ -91,6 +91,22 @@ def response_text(response) -> str:
     """
     return "".join(b.text for b in response.content if b.type == "text")
 
+def _log_api_error(e: "anthropic.APIStatusError", round_trip: int) -> None:
+    """Log what the API said about a failed request, after the SDK's own retries.
+
+    The request ID and the retry-after / x-ratelimit-* / anthropic-* headers are
+    what distinguish one kind of 429 from another, and what Anthropic support asks for.
+    """
+    headers = {
+        k: v for k, v in e.response.headers.items()
+        if k == "retry-after" or k.startswith(("x-ratelimit", "anthropic-"))
+    }
+    logger.error(
+        "API error on round-trip %d: HTTP %s request_id=%s headers=%s body=%s",
+        round_trip, e.status_code, e.request_id, headers, e.body,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ClaudeHandler
 # ---------------------------------------------------------------------------
@@ -447,20 +463,24 @@ class ClaudeHandler:
                 max_tokens=MAX_TOKENS,
                 **self._request_options(),
             )
-            if self.block_binding:
-                response = self.client.beta.messages.create(
-                    **request,
-                    thinking={
-                        "type": "adaptive",
-                        "block_binding": {"prefix_mismatch_behavior": self.block_binding},
-                    },
-                    betas=["thinking-binding-controls-2026-08-01"],
-                )
-                dropped = getattr(response, "input_transformations", None)
-                if dropped:
-                    logger.info("Thinking blocks dropped by the API: %s", dropped)
-            else:
-                response = self.client.messages.create(**request)
+            try:
+                if self.block_binding:
+                    response = self.client.beta.messages.create(
+                        **request,
+                        thinking={
+                            "type": "adaptive",
+                            "block_binding": {"prefix_mismatch_behavior": self.block_binding},
+                        },
+                        betas=["thinking-binding-controls-2026-08-01"],
+                    )
+                    dropped = getattr(response, "input_transformations", None)
+                    if dropped:
+                        logger.info("Thinking blocks dropped by the API: %s", dropped)
+                else:
+                    response = self.client.messages.create(**request)
+            except anthropic.APIStatusError as e:
+                _log_api_error(e, round_trip)
+                raise
             elapsed = time.monotonic() - t0
             if response.stop_reason == "refusal":
                 # Declined by a safety classifier or by the model. Content is
