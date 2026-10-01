@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
+import anthropic
 import pandas as pd
 import streamlit as st
 
@@ -295,13 +296,22 @@ def _enqueue_input(text, attachment=None):
 def _run_agent(text):
     path = st.session_state.conversation_path
     handler = st.session_state.handler
-    is_first = len(st.session_state.turns) == 1  # only the user turn just added
+    # Counted on messages, not turns: turns also holds the welcome message.
+    is_first = len(st.session_state.messages) == 1
 
     prev_len = len(st.session_state.messages)
     st.session_state.tables_to_show = []
 
+    rate_limited = False
     with st.spinner("working..."):
-        messages, _response = handler.run_tool_loop(st.session_state.messages)
+        try:
+            messages, _response = handler.run_tool_loop(st.session_state.messages)
+        except anthropic.RateLimitError:
+            # run_tool_loop appends to this list in place, so it holds every
+            # round-trip that completed. It ends on a user turn, which the
+            # API merges with the user's next message.
+            messages, _response = st.session_state.messages, None
+            rate_limited = True
 
     st.session_state.messages = messages
     new_messages = messages[prev_len:]
@@ -331,6 +341,13 @@ def _run_agent(text):
                 + (f" (category: {category})" if category else "")
                 + ". Try rephrasing it, or ask it a different way."
             ),
+        })
+
+    if rate_limited:
+        st.session_state.turns.append({
+            "role": "assistant",
+            "tool_calls": [],
+            "text": "The API rate limit was reached, so this turn stopped early. Wait a minute, then send your message again.",
         })
 
 
