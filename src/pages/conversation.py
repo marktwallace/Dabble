@@ -99,7 +99,7 @@ def _init_session():
         db = st.session_state.get("analytic_db")
         system_prompt = build_system_prompt(PROMPTS_DIR, db)
         state = SessionState(analytic_db=db)
-        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR, state)
+        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR, state, PROMPTS_DIR)
         # The same objects the handler's tools write, for rendering and the review pages.
         st.session_state.dataframes = state.dataframes
         st.session_state.figures = state.figures

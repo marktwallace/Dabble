@@ -16,6 +16,8 @@ import pandas as pd
 
 from .chart_renderer import render_chart as _render_chart
 from .knowledge_base import build_registry_block, delete_chunk, overwrite_chunk, read_chunk, write_chunk
+from .prompt_files import PromptFileError
+from .prompt_files import read as read_prompt_file
 from .session import SessionState
 
 
@@ -112,8 +114,11 @@ def _log_api_error(e: "anthropic.APIStatusError", round_trip: int) -> None:
 # ---------------------------------------------------------------------------
 
 class ClaudeHandler:
-    def __init__(self, system_prompt: str, knowledge_dir: Optional[str] = None, state: Optional[SessionState] = None):
+    def __init__(self, system_prompt: str, knowledge_dir: Optional[str] = None, state: Optional[SessionState] = None,
+                 prompts_dir: Optional[str] = None):
         self.knowledge_dir = knowledge_dir
+        # Where read_document looks. Unset, the tool is not offered.
+        self.prompts_dir = prompts_dir
         self.state = state if state is not None else SessionState()
         registry = build_registry_block(knowledge_dir) if knowledge_dir else ""
         self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
@@ -140,7 +145,7 @@ class ClaudeHandler:
     # --- Tool definitions ---------------------------------------------------
 
     def _tools(self) -> list[dict]:
-        return [
+        tools = [
             {
                 "name": "run_sql",
                 "description": (
@@ -299,6 +304,23 @@ class ClaudeHandler:
                 },
             },
         ]
+        if self.prompts_dir:
+            tools.append({
+                "name": "read_document",
+                "description": (
+                    "Read a reference document from the prompt directory, in full. "
+                    "Use the paths the system prompt names, and read a document before "
+                    "relying on what it covers."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path relative to the prompt directory, as the system prompt names it (e.g. 'topics/example.md')."},
+                    },
+                    "required": ["path"],
+                },
+            })
+        return tools
 
     # --- Tool implementations ------------------------------------------------
 
@@ -320,6 +342,8 @@ class ClaudeHandler:
                 return self._update_knowledge(inputs["description"], inputs["content"], inputs.get("slug"))
             elif name == "delete_knowledge":
                 return self._delete_knowledge(inputs["slug"])
+            elif name == "read_document":
+                return self._read_document(inputs["path"])
             else:
                 return f"Unknown tool: {name}"
         except Exception:
@@ -440,6 +464,14 @@ class ClaudeHandler:
             return f"Deleted chunk '{slug}'."
         except FileNotFoundError:
             return f"Error: no chunk named '{slug}'."
+
+    def _read_document(self, path: str) -> str:
+        if not self.prompts_dir:
+            return "Error: no prompt directory configured."
+        try:
+            return read_prompt_file(self.prompts_dir, path)
+        except PromptFileError as e:
+            return f"Error: {e}"
 
     # --- Tool loop -----------------------------------------------------------
 

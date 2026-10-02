@@ -73,7 +73,7 @@ def main() -> int:
 
     knowledge_dir = os.environ.get("KNOWLEDGE_DIR", "knowledge")
     state = SessionState(analytic_db=db)
-    handler = ClaudeHandler(build_system_prompt(args.prompts_dir, db), knowledge_dir, state)
+    handler = ClaudeHandler(build_system_prompt(args.prompts_dir, db), knowledge_dir, state, args.prompts_dir)
 
     messages = conv_file.load_messages(path) if args.conversation else []
     replay_tool_calls(messages, handler)

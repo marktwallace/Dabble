@@ -267,6 +267,22 @@ domain corrections, join patterns, etc.
 
 ---
 
+## Prompt Files
+
+A domain overlay's prompt can be written as several files. In `system_prompt.md`, and in any document the model reads, a line consisting only of `@<path>` (a `.md` or `.txt` path relative to the prompt directory) is replaced by that file's contents, expanded the same way — the import syntax of Claude Code's `CLAUDE.md`. Includes may nest; a path outside the prompt directory, a cycle, nesting deeper than five levels, or a missing file is an error that names the file. A prompt without include lines loads exactly as before.
+
+`read_document(path)` — offered when a prompt directory is configured. Reads a file under the prompt directory in full, includes expanded. The system prompt names the documents and when to read them, so reference material can be loaded when a question needs it rather than on every turn. Small files can be composed into larger documents with include lines, so the units the model loads can be regrouped without moving text.
+
+## Headless Turns
+
+`run_turn.py` runs one conversation turn from the command line, with the same system prompt, database connection and tools as the app, and writes the conversation's `.txt` and `.json` files where the app does, so the conversation opens in the app afterwards:
+
+    uv run python run_turn.py "question"                                  # new conversation
+    uv run python run_turn.py --conversation conversations/X.txt "follow-up"
+    uv run python run_turn.py --prompts-dir /path/to/prompts "question"
+
+It prints the conversation path and the final reply. Do not add a turn to a conversation that is open in a browser: that session does not see the new turn and overwrites the files on its next turn. Slash commands and attachments are not supported.
+
 ## Architecture
 
 **Five Streamlit pages:** entry screen, conversation view, /learn confirmation screen, /snapshot review screen, /report review screen.

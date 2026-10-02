@@ -11,15 +11,17 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import conversation_file as conv_file
+from . import prompt_files
 from .claude_handler import configured_model
 
 REPLAYED_TOOLS = ("run_sql", "run_python", "render_chart", "save_file", "show_table")
 
 
 def build_system_prompt(prompts_dir: str, db) -> str:
-    """Date and model line, INSTANCE_CONTEXT, the overlay's system_prompt.md, live schema."""
+    """Date and model line, INSTANCE_CONTEXT, the overlay's system_prompt.md (includes
+    expanded), live schema."""
     prompt_path = Path(prompts_dir) / "system_prompt.md"
-    system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+    system_prompt = prompt_files.read(prompts_dir, "system_prompt.md") if prompt_path.exists() else ""
     pt = datetime.now(ZoneInfo("America/Los_Angeles"))
     utc = datetime.now(ZoneInfo("UTC"))
     now = (
