@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 import anthropic
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 from .chart_renderer import render_chart as _render_chart
 from .knowledge_base import build_registry_block, delete_chunk, overwrite_chunk, read_chunk, write_chunk
+from .session import SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +112,9 @@ def _log_api_error(e: "anthropic.APIStatusError", round_trip: int) -> None:
 # ---------------------------------------------------------------------------
 
 class ClaudeHandler:
-    def __init__(self, system_prompt: str, knowledge_dir: Optional[str] = None):
+    def __init__(self, system_prompt: str, knowledge_dir: Optional[str] = None, state: Optional[SessionState] = None):
         self.knowledge_dir = knowledge_dir
+        self.state = state if state is not None else SessionState()
         registry = build_registry_block(knowledge_dir) if knowledge_dir else ""
         self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
         self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -327,7 +328,7 @@ class ClaudeHandler:
             return tb
 
     def _run_sql(self, sql: str, dataframe_id: str) -> str:
-        db = st.session_state.get("analytic_db")
+        db = self.state.analytic_db
         if not db:
             return "Error: no analytic database configured."
         df, err = db.execute_query(sql)
@@ -336,16 +337,16 @@ class ClaudeHandler:
             return f"SQL error: {err}"
         if df is None or df.empty:
             return "Query returned no rows."
-        st.session_state.dataframes[dataframe_id] = df
-        st.session_state.artifact_order.append(("dataframe", dataframe_id))
+        self.state.dataframes[dataframe_id] = df
+        self.state.artifact_order.append(("dataframe", dataframe_id))
         self._evict_dataframes()
         return df_summary(df)
 
     def _show_table(self, dataframe_id: str) -> str:
-        if dataframe_id not in st.session_state.dataframes:
+        if dataframe_id not in self.state.dataframes:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
-        st.session_state.shown_dataframes.add(dataframe_id)
-        st.session_state.tables_to_show.append(dataframe_id)
+        self.state.shown_dataframes.add(dataframe_id)
+        self.state.tables_to_show.append(dataframe_id)
         return "Displayed to user."
 
     def _evict_dataframes(self) -> None:
@@ -356,32 +357,32 @@ class ClaudeHandler:
         DataFrames (used as chart/python inputs but never directly shown) are
         candidates for eviction.
         """
-        if len(st.session_state.dataframes) <= MAX_STORED_DATAFRAMES:
+        if len(self.state.dataframes) <= MAX_STORED_DATAFRAMES:
             return
-        protected = st.session_state.get("shown_dataframes", set())
+        protected = self.state.shown_dataframes
         ordered_ids = list(dict.fromkeys(
-            aid for kind, aid in st.session_state.artifact_order if kind == "dataframe"
+            aid for kind, aid in self.state.artifact_order if kind == "dataframe"
         ))
         evict_candidates = [i for i in ordered_ids if i not in protected]
-        n_to_evict = len(st.session_state.dataframes) - MAX_STORED_DATAFRAMES
+        n_to_evict = len(self.state.dataframes) - MAX_STORED_DATAFRAMES
         for eid in evict_candidates[:n_to_evict]:
-            st.session_state.dataframes.pop(eid, None)
+            self.state.dataframes.pop(eid, None)
 
     def _render_chart(self, dataframe_id: str, code: str, chart_id: str | None) -> str:
-        df = st.session_state.dataframes.get(dataframe_id)
+        df = self.state.dataframes.get(dataframe_id)
         if df is None:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
         fig, err = _render_chart(df, code)
         key = chart_id or dataframe_id
         if err:
-            st.session_state.figures[key] = {"error": err}
+            self.state.figures[key] = {"error": err}
             return f"Chart error:\n{err}"
-        st.session_state.figures[key] = {"figure": fig, "code": code, "dataframe_id": dataframe_id}
-        st.session_state.artifact_order.append(("chart", key))
+        self.state.figures[key] = {"figure": fig, "code": code, "dataframe_id": dataframe_id}
+        self.state.artifact_order.append(("chart", key))
         return "Chart rendered."
 
     def _run_python(self, dataframe_id: str, code: str, output_id: str | None) -> str:
-        df = st.session_state.dataframes.get(dataframe_id)
+        df = self.state.dataframes.get(dataframe_id)
         if df is None:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
         ns = {"df": df.copy(), "pd": pd, "np": np}
@@ -390,8 +391,8 @@ class ClaudeHandler:
             result = ns.get("result")
             if isinstance(result, pd.DataFrame):
                 store_id = output_id or dataframe_id
-                st.session_state.dataframes[store_id] = result
-                st.session_state.artifact_order.append(("dataframe", store_id))
+                self.state.dataframes[store_id] = result
+                self.state.artifact_order.append(("dataframe", store_id))
                 return df_summary(result)
             elif result is not None:
                 return str(result)
@@ -401,7 +402,7 @@ class ClaudeHandler:
             return traceback.format_exc()
 
     def _save_file(self, dataframe_id: str, filename: str, fmt: str) -> str:
-        df = st.session_state.dataframes.get(dataframe_id)
+        df = self.state.dataframes.get(dataframe_id)
         if df is None:
             return f"Error: '{dataframe_id}' not found. Call run_sql first."
         exports_dir = Path("exports")
@@ -413,7 +414,7 @@ class ClaudeHandler:
             df.to_excel(path, index=False)
         elif fmt == "parquet":
             df.to_parquet(path, index=False)
-        st.session_state.exported_files[filename] = path.read_bytes()
+        self.state.exported_files[filename] = path.read_bytes()
         return f"Saved {len(df)} rows to {path}"
 
     def _recall_knowledge(self, chunk: str) -> str:

@@ -1,8 +1,6 @@
 import base64
 import os
 import threading
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import anthropic
@@ -10,13 +8,14 @@ import pandas as pd
 import streamlit as st
 
 from .. import conversation_file as conv_file
-from ..claude_handler import ClaudeHandler, configured_model
+from ..agent_session import build_system_prompt, prepend_title, replay_tool_calls, write_new_messages
+from ..claude_handler import ClaudeHandler
 from ..knowledge_base import list_registry
+from ..session import SessionState
 
 PROMPTS_DIR = os.environ.get("PROMPTS_DIR", "prompts")
 KNOWLEDGE_DIR = os.environ.get("KNOWLEDGE_DIR", "knowledge")
 UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
-INSTANCE_CONTEXT = os.environ.get("INSTANCE_CONTEXT", "").strip()
 
 
 def render():
@@ -90,45 +89,6 @@ def render():
 # Session state
 # ---------------------------------------------------------------------------
 
-def _replay_tool_calls(messages: list[dict], handler) -> None:
-    """Re-execute artifact-producing tool calls to restore session state on load."""
-    for msg in messages:
-        if msg["role"] != "assistant":
-            continue
-        for block in msg["content"]:
-            if block.get("type") == "tool_use" and block["name"] in ("run_sql", "run_python", "render_chart", "save_file", "show_table"):
-                handler._execute_tool(block["name"], block["input"])
-
-
-def _build_schema_context() -> str:
-    db = st.session_state.get("analytic_db")
-    if not db:
-        return ""
-    tables_df, err = db.execute_query("SHOW TABLES")
-    if err or tables_df is None or tables_df.empty:
-        return ""
-    lines = ["## Current database schema"]
-    for table in tables_df["name"]:
-        desc_df, desc_err = db.execute_query(f"DESCRIBE \"{table}\"")
-        if desc_err or desc_df is None:
-            lines.append(f"- {table}")
-        else:
-            cols = ", ".join(
-                f"{row['column_name']} ({row['column_type']})"
-                for _, row in desc_df.iterrows()
-            )
-            lines.append(f"- {table}: {cols}")
-    lines.append("""
-## Tool execution environment
-
-render_chart namespace: df (the dataframe), go (plotly.graph_objects), px (plotly.express), pd (pandas), np (numpy). Must assign a go.Figure to 'fig'.
-
-run_python namespace: df (the input dataframe), pd (pandas), np (numpy). You can import any installed package. Installed packages: anthropic, boto3, duckdb, numpy, openpyxl, pandas, plotly, python-dotenv, streamlit.
-
-To save a dataframe as a downloadable file, use the save_file tool.""")
-    return "\n".join(lines)
-
-
 def _init_session():
     if "upload_counter" not in st.session_state:
         st.session_state.upload_counter = 0
@@ -136,35 +96,23 @@ def _init_session():
     path = st.session_state.get("conversation_path")
     if st.session_state.get("_active_path") != path:
         st.session_state._active_path = path
-        prompt_path = Path(PROMPTS_DIR) / "system_prompt.md"
-        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        pt = datetime.now(ZoneInfo("America/Los_Angeles"))
-        utc = datetime.now(ZoneInfo("UTC"))
-        now = (
-            f"{pt.strftime('%A, %B %-d, %Y, %-I:%M %p %Z')} (office); "
-            f"server is {utc.strftime('%-I:%M %p UTC')}"
-        )
-        if INSTANCE_CONTEXT:
-            system_prompt = INSTANCE_CONTEXT + "\n\n" + system_prompt
-        effort = os.environ.get("CLAUDE_EFFORT", "").strip()
-        model_line = f"Model: {configured_model()}" + (f", effort {effort}" if effort else "")
-        system_prompt = f"Current date and time: {now}\n{model_line}\n\n" + system_prompt
-        schema = _build_schema_context()
-        if schema:
-            system_prompt = system_prompt + ("\n\n" if system_prompt else "") + schema
-        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR)
-        st.session_state.dataframes = {}
-        st.session_state.figures = {}
-        st.session_state.artifact_order = []
-        st.session_state.tables_to_show = []
-        st.session_state.shown_dataframes = set()
-        st.session_state.exported_files = {}
+        db = st.session_state.get("analytic_db")
+        system_prompt = build_system_prompt(PROMPTS_DIR, db)
+        state = SessionState(analytic_db=db)
+        st.session_state.handler = ClaudeHandler(system_prompt, KNOWLEDGE_DIR, state)
+        # The same objects the handler's tools write, for rendering and the review pages.
+        st.session_state.dataframes = state.dataframes
+        st.session_state.figures = state.figures
+        st.session_state.artifact_order = state.artifact_order
+        st.session_state.tables_to_show = state.tables_to_show
+        st.session_state.shown_dataframes = state.shown_dataframes
+        st.session_state.exported_files = state.exported_files
         # Guards _run_agent against concurrent script runs interleaving messages.
         st.session_state._run_lock = threading.Lock()
         saved = conv_file.load_messages(path) if path else []
         st.session_state.messages = saved
         st.session_state.turns = _messages_to_turns(saved)
-        _replay_tool_calls(saved, st.session_state.handler)
+        replay_tool_calls(saved, st.session_state.handler)
         if not st.session_state.turns:
             welcome_path = Path(PROMPTS_DIR) / "welcome_message.txt"
             if welcome_path.exists():
@@ -300,7 +248,7 @@ def _run_agent(text):
     is_first = len(st.session_state.messages) == 1
 
     prev_len = len(st.session_state.messages)
-    st.session_state.tables_to_show = []
+    st.session_state.tables_to_show.clear()
 
     rate_limited = False
     with st.spinner("working..."):
@@ -317,12 +265,9 @@ def _run_agent(text):
     new_messages = messages[prev_len:]
 
     if is_first:
-        title = handler.generate_title(text)
-        # Prepend title without losing the user turn already written by append_user
-        existing = Path(path).read_text(encoding="utf-8") if Path(path).exists() else ""
-        Path(path).write_text(title + "\n" + existing, encoding="utf-8")
+        prepend_title(path, handler.generate_title(text))
 
-    _write_new_messages(path, new_messages)
+    write_new_messages(path, new_messages)
     conv_file.save_messages(path, messages)
 
     for turn in _extract_assistant_turns(new_messages):
@@ -424,28 +369,6 @@ def _handle_notebook():
     st.session_state.pop("notebook_draft", None)
     st.session_state.page = "notebook_review"
     st.rerun()
-
-
-# ---------------------------------------------------------------------------
-# File persistence
-# ---------------------------------------------------------------------------
-
-def _write_new_messages(path, new_messages):
-    i = 0
-    while i < len(new_messages):
-        msg = new_messages[i]
-        if msg["role"] == "assistant":
-            tool_results = []
-            if (
-                i + 1 < len(new_messages)
-                and new_messages[i + 1]["role"] == "user"
-                and isinstance(new_messages[i + 1]["content"], list)
-                and any(b.get("type") == "tool_result" for b in new_messages[i + 1]["content"])
-            ):
-                tool_results = new_messages[i + 1]["content"]
-                i += 1
-            conv_file.append_assistant_turn(path, msg["content"], tool_results)
-        i += 1
 
 
 # ---------------------------------------------------------------------------
