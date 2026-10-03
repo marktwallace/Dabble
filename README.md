@@ -48,10 +48,18 @@ cp .env.example .env
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
 | `CLAUDE_MODEL` | Yes | Model every request uses (e.g. `claude-opus-5-5`); also named to the model in its system prompt |
-| `DUCKDB_ANALYTIC_FILE` | Yes | Path to your DuckDB file (created on first run if absent) |
+| `DUCKDB_ANALYTIC_FILE` | One database mode | Path to your DuckDB file (created on first run if absent) |
+| `DUCKDB_READ_ONLY` | No | `1`, `true` or `yes` opens the DuckDB file read-only |
+| `DABBLE_S3_BUCKET` | One database mode | DuckLake on S3: catalog downloaded from `s3://<bucket>/<prefix>/catalog.duckdb` at start and on `/refresh`, data read from `<prefix>/data/` |
+| `DABBLE_S3_PREFIX` | No | Prefix within the bucket (default: `prod`) |
+| `DABBLE_DATA_PATH` | One database mode | DuckLake synced to a local directory holding `catalog.duckdb` and `data/` |
+| `DABBLE_DB_NAME` | With a DuckLake | Catalog alias; must match what the writer used |
+| `DABBLE_EXTRA_CATALOGS` | No | More DuckLake catalogs, attached read-only beside the main database in any mode: comma-separated `name=<catalog>`, each attached as `ATTACH 'ducklake:<catalog>' AS name`, so it uses the data path recorded in its catalog. A catalog file on S3 (`s3://…`) is downloaded first; any other value is passed to `ATTACH` as is. Tables are queried as `name.table` and listed so in the system prompt's schema |
+| `PROMPTS_DIR` | No | Directory holding `system_prompt.md` and the documents `read_document` reads (default: `prompts`) |
 | `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
 | `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
-| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp |
+| `UPLOADS_DIR`, `REPORTS_DIR`, `NOTEBOOKS_DIR` | No | Uploaded files, `/report` and `/notebook` outputs (defaults: `uploads`, `reports`, `notebooks`) |
+| `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp (file mode; DuckLake modes use the latest snapshot time) |
 | `CLAUDE_EFFORT` | No | Effort level sent with every request (`low`, `medium`, `high`, `xhigh`, `max`); unset uses the model's default |
 | `CLAUDE_THINKING_BLOCK_BINDING` | No | `drop_block` or `error`. For models that tie thinking blocks to their conversation: what the API does with earlier thinking blocks a resumed conversation no longer matches |
 | `INSTANCE_CONTEXT` | No | Text added to the system prompt after the date line — e.g. which environment's data this instance reads |

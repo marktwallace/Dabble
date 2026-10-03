@@ -57,6 +57,23 @@ def schema_context(db) -> str:
                 for _, row in desc_df.iterrows()
             )
             lines.append(f"- {table}: {cols}")
+    for catalog in getattr(db, "extra_catalogs", []):
+        names_df, names_err = db.execute_query(
+            f"SELECT table_name FROM duckdb_tables() WHERE database_name = '{catalog}' ORDER BY table_name"
+        )
+        if names_err or names_df is None or names_df.empty:
+            continue
+        lines.append(f"\n## Attached catalog `{catalog}` (read-only; query as {catalog}.<table>)")
+        for table in names_df["table_name"]:
+            desc_df, desc_err = db.execute_query(f"DESCRIBE {catalog}.\"{table}\"")
+            if desc_err or desc_df is None:
+                lines.append(f"- {catalog}.{table}")
+            else:
+                cols = ", ".join(
+                    f"{row['column_name']} ({row['column_type']})"
+                    for _, row in desc_df.iterrows()
+                )
+                lines.append(f"- {catalog}.{table}: {cols}")
     lines.append("""
 ## Tool execution environment
 

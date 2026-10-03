@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -22,12 +23,21 @@ class DuckDBAnalytic:
     DuckLake mode requires DABBLE_DB_NAME — the catalog alias and metadata catalog
     base name. This must match what the ETL used when writing.
 
+    Extra catalogs (any mode) — DABBLE_EXTRA_CATALOGS, comma-separated
+        name=<catalog> entries. Each is attached read-only beside the main
+        database as ATTACH 'ducklake:<catalog>' AS name (READ_ONLY), so it uses
+        the data path recorded in its catalog; queries reach it as name.table.
+        A catalog given as s3://... is downloaded first, since DuckDB does not
+        open a database file from S3; any other value is passed to ATTACH as is.
+
     """
 
     def __init__(self):
         self.conn = None
         self.cached_timestamp = None
         self._local_catalog_path = None  # temp file path in S3 mode
+        self._extra_catalog_paths = {}  # name -> temp file path
+        self.extra_catalogs = []  # names attached beside the main database
         self._connect()
 
     # ------------------------------------------------------------------
@@ -40,6 +50,7 @@ class DuckDBAnalytic:
             self._connect_ducklake(s3_bucket)
         else:
             self._connect_local()
+        self._attach_extra_catalogs()
         self.cached_timestamp = self._query_timestamp()
         if self.conn:
             logger.info("Database ready: watermark=%s", self.cached_timestamp)
@@ -89,6 +100,43 @@ class DuckDBAnalytic:
         """)
         self.conn.execute(f"USE {db_name}")
         self._assert_tables_exist(self._local_catalog_path)
+
+    def _attach_extra_catalogs(self):
+        """Attach each DABBLE_EXTRA_CATALOGS entry read-only beside the main database."""
+        self.extra_catalogs = []
+        entries = _parse_extra_catalogs(os.environ.get("DABBLE_EXTRA_CATALOGS", ""))
+        if not entries:
+            return
+        if not self.conn:
+            raise RuntimeError("DABBLE_EXTRA_CATALOGS is set but no main database is configured")
+        # The same S3 access the DuckLake mode sets up, for catalogs or data on S3.
+        self.conn.execute("INSTALL ducklake; LOAD ducklake;")
+        self.conn.execute("INSTALL httpfs; LOAD httpfs;")
+        self.conn.execute("CREATE SECRET IF NOT EXISTS s3_creds (TYPE S3, PROVIDER CREDENTIAL_CHAIN);")
+        self.conn.execute("SET s3_url_style = 'path';")
+        for name, catalog in entries:
+            if catalog.startswith("s3://"):
+                catalog = self._download_extra_catalog(name, catalog)
+            catalog_sql = catalog.replace("'", "''")
+            self.conn.execute(f"ATTACH 'ducklake:{catalog_sql}' AS {name} (READ_ONLY)")
+            self.extra_catalogs.append(name)
+            logger.info("Attached extra catalog %s", name)
+
+    def _download_extra_catalog(self, name: str, uri: str) -> str:
+        """Download an s3:// catalog file to a temp file (reused on refresh); return its path."""
+        bucket, _, key = uri[len("s3://"):].partition("/")
+        if not bucket or not key:
+            raise ValueError(f"DABBLE_EXTRA_CATALOGS: {name}: expected s3://bucket/key, got {uri!r}")
+        path = self._extra_catalog_paths.get(name)
+        if path is None:
+            tmp = tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False)
+            path = tmp.name
+            tmp.close()
+            self._extra_catalog_paths[name] = path
+        import boto3
+        logger.info("Downloading extra catalog %s from %s", name, uri)
+        boto3.client("s3").download_file(bucket, key, path)
+        return path
 
     def _connect_local(self):
         data_path = os.environ.get("DABBLE_DATA_PATH")
@@ -242,3 +290,24 @@ class DuckDBAnalytic:
             finally:
                 self.conn = None
                 self.cached_timestamp = None
+
+
+_CATALOG_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _parse_extra_catalogs(value: str) -> list[tuple[str, str]]:
+    """Parse 'name=<catalog>,...' into (name, catalog) pairs."""
+    entries = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        name, sep, catalog = item.partition("=")
+        name, catalog = name.strip(), catalog.strip()
+        if not sep or not catalog or not _CATALOG_NAME.match(name):
+            raise ValueError(f"DABBLE_EXTRA_CATALOGS: bad entry {item!r}; expected name=<catalog>")
+        entries.append((name, catalog))
+    names = [e[0] for e in entries]
+    if len(names) != len(set(names)):
+        raise ValueError(f"DABBLE_EXTRA_CATALOGS: duplicate names in {names}")
+    return entries
