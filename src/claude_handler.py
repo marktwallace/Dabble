@@ -182,7 +182,8 @@ class ClaudeHandler:
                 "name": "render_chart",
                 "description": (
                     "Render a Plotly chart from a previously fetched dataframe. "
-                    "The full dataframe is available as 'df'. "
+                    "The full dataframe is available as 'df'; further dataframes named in dataframe_ids, "
+                    "with the first, are in the dict 'dfs' by id. "
                     "Use plotly.graph_objects (go) or plotly.express (px) — both are available. "
                     "Assign a go.Figure to 'fig'. "
                     "Charts are shown in the app's theme (dark), so leave colors unset unless the user "
@@ -194,7 +195,9 @@ class ClaudeHandler:
                     "type": "object",
                     "properties": {
                         "dataframe_id": {"type": "string", "description": "The dataframe_id from a previous run_sql call."},
-                        "code": {"type": "string", "description": "Python code that assigns a go.Figure to 'fig'. Available: df, go, px, pd, np."},
+                        "dataframe_ids": {"type": "array", "items": {"type": "string"},
+                                          "description": "Optional further dataframe_ids the code needs, available in 'dfs'."},
+                        "code": {"type": "string", "description": "Python code that assigns a go.Figure to 'fig'. Available: df, dfs, go, px, pd, np."},
                         "chart_id": {"type": "string", "description": "Optional ID for this chart. Defaults to dataframe_id. Use different values for multiple charts from the same dataframe."},
                     },
                     "required": ["dataframe_id", "code"],
@@ -206,7 +209,8 @@ class ClaudeHandler:
                     "Run Python code against a dataframe. Use for transforms, statistical analysis, "
                     "modelling, or any computation where SQL alone is insufficient. "
                     "The full scientific Python stack is available — import any installed package. "
-                    "The input dataframe is available as 'df'. "
+                    "The input dataframe is available as 'df'; when the code needs more than one, name the "
+                    "others in dataframe_ids and read every one, the first included, from the dict 'dfs' by id. "
                     "If you assign a DataFrame to 'result', it is stored and summarised. "
                     "If 'result' is any other value, it is returned as a string. "
                     "If 'result' is not assigned, the tool returns 'Code executed successfully.'"
@@ -215,7 +219,9 @@ class ClaudeHandler:
                     "type": "object",
                     "properties": {
                         "dataframe_id": {"type": "string", "description": "Input dataframe_id from a previous run_sql call."},
-                        "code": {"type": "string", "description": "Python code with df, pd, np available. Optionally assign a DataFrame or any value to 'result'."},
+                        "dataframe_ids": {"type": "array", "items": {"type": "string"},
+                                          "description": "Optional further input dataframe_ids, available in 'dfs'."},
+                        "code": {"type": "string", "description": "Python code with df, dfs, pd, np available. Optionally assign a DataFrame or any value to 'result'."},
                         "output_dataframe_id": {"type": "string", "description": "Name for the resulting dataframe. Required only if result is a DataFrame."},
                     },
                     "required": ["dataframe_id", "code"],
@@ -331,9 +337,11 @@ class ClaudeHandler:
             elif name == "show_table":
                 return self._show_table(inputs["dataframe_id"])
             elif name == "render_chart":
-                return self._render_chart(inputs["dataframe_id"], inputs["code"], inputs.get("chart_id"))
+                return self._render_chart(inputs["dataframe_id"], inputs["code"], inputs.get("chart_id"),
+                                          inputs.get("dataframe_ids"))
             elif name == "run_python":
-                return self._run_python(inputs["dataframe_id"], inputs["code"], inputs.get("output_dataframe_id"))
+                return self._run_python(inputs["dataframe_id"], inputs["code"], inputs.get("output_dataframe_id"),
+                                        inputs.get("dataframe_ids"))
             elif name == "save_file":
                 return self._save_file(inputs["dataframe_id"], inputs["filename"], inputs["format"])
             elif name == "recall_knowledge":
@@ -392,11 +400,19 @@ class ClaudeHandler:
         for eid in evict_candidates[:n_to_evict]:
             self.state.dataframes.pop(eid, None)
 
-    def _render_chart(self, dataframe_id: str, code: str, chart_id: str | None) -> str:
-        df = self.state.dataframes.get(dataframe_id)
-        if df is None:
-            return f"Error: '{dataframe_id}' not found. Call run_sql first."
-        fig, err = _render_chart(df, code)
+    def _inputs(self, dataframe_id: str, extra_ids: list | None) -> tuple[dict | None, str | None]:
+        """The named input dataframes, the first being dataframe_id; or an error naming those not found."""
+        ids = list(dict.fromkeys([dataframe_id, *(extra_ids or [])]))
+        missing = [i for i in ids if i not in self.state.dataframes]
+        if missing:
+            return None, f"Error: {', '.join(repr(i) for i in missing)} not found. Call run_sql first."
+        return {i: self.state.dataframes[i] for i in ids}, None
+
+    def _render_chart(self, dataframe_id: str, code: str, chart_id: str | None, extra_ids: list | None = None) -> str:
+        dfs, err = self._inputs(dataframe_id, extra_ids)
+        if err:
+            return err
+        fig, err = _render_chart(dfs[dataframe_id], code, dfs)
         key = chart_id or dataframe_id
         if err:
             self.state.figures[key] = {"error": err}
@@ -405,11 +421,12 @@ class ClaudeHandler:
         self.state.artifact_order.append(("chart", key))
         return "Chart rendered."
 
-    def _run_python(self, dataframe_id: str, code: str, output_id: str | None) -> str:
-        df = self.state.dataframes.get(dataframe_id)
-        if df is None:
-            return f"Error: '{dataframe_id}' not found. Call run_sql first."
-        ns = {"df": df.copy(), "pd": pd, "np": np}
+    def _run_python(self, dataframe_id: str, code: str, output_id: str | None, extra_ids: list | None = None) -> str:
+        dfs, err = self._inputs(dataframe_id, extra_ids)
+        if err:
+            return err
+        dfs = {i: d.copy() for i, d in dfs.items()}
+        ns = {"df": dfs[dataframe_id], "dfs": dfs, "pd": pd, "np": np}
         try:
             exec(dedent(code.strip()), ns)  # noqa: S102
             result = ns.get("result")

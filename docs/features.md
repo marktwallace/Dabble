@@ -64,9 +64,11 @@ A chat interface backed by Claude, on the model set by `CLAUDE_MODEL`. The full 
 
 `show_table(dataframe_id)` — render the full DataFrame in the Streamlit UI using `st.dataframe()`. The human's visual system reads it; Claude does not need to re-read it.
 
-`render_chart(dataframe_id, plotly_code, chart_id)` — render a Plotly figure using the full in-memory DataFrame. Claude can iterate on a chart without re-querying. The human reads the chart visually.
+`render_chart(dataframe_id, plotly_code, chart_id, dataframe_ids?)` — render a Plotly figure using the full in-memory DataFrame. Claude can iterate on a chart without re-querying. The human reads the chart visually.
 
-`run_python(dataframe_id, code, output_dataframe_id?)` — run Python against a dataframe for transforms, statistical analysis, modelling, or any computation where SQL alone is insufficient. The full scientific Python stack is available. If `result` is assigned a DataFrame it is stored; if it is any other value it is returned as a string; if unassigned, returns "Code executed successfully."
+`run_python(dataframe_id, code, output_dataframe_id?, dataframe_ids?)` — run Python against a dataframe for transforms, statistical analysis, modelling, or any computation where SQL alone is insufficient. The full scientific Python stack is available. If `result` is assigned a DataFrame it is stored; if it is any other value it is returned as a string; if unassigned, returns "Code executed successfully."
+
+Both take the input as `df`. When the code needs several dataframes — say rows from two queries that are not one join — `dataframe_ids` names the others, and every input, the first included, is in the dict `dfs` by id. A missing id is an error naming it.
 
 `save_file(dataframe_id, filename, format)` — save a dataframe to `exports/` as CSV, Excel, or Parquet and render a download button in the conversation. Covers the "email me this data" workflow that a Jupyter user handles with `df.to_csv()`.
 
