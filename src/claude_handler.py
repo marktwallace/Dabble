@@ -85,6 +85,23 @@ def configured_model() -> str:
     return model
 
 
+def make_client():
+    """The API client, chosen by CLAUDE_PROVIDER: `anthropic` (default) or `bedrock`.
+
+    anthropic: the Claude API, with ANTHROPIC_API_KEY.
+    bedrock: Amazon Bedrock's bedrock-runtime endpoint, signed with the AWS credentials
+    found the usual way (an instance or task role, a profile, or keys in the environment),
+    in AWS_REGION. CLAUDE_MODEL is then a Bedrock model or inference profile ID,
+    e.g. us.anthropic.claude-opus-5-5.
+    """
+    provider = os.environ.get("CLAUDE_PROVIDER", "anthropic").strip().lower() or "anthropic"
+    if provider == "anthropic":
+        return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    if provider == "bedrock":
+        return anthropic.AnthropicBedrock()
+    raise RuntimeError(f"CLAUDE_PROVIDER is {provider!r}; use anthropic or bedrock.")
+
+
 def response_text(response) -> str:
     """The text of a response, read by block type.
 
@@ -97,11 +114,12 @@ def _log_api_error(e: "anthropic.APIStatusError", round_trip: int) -> None:
     """Log what the API said about a failed request, after the SDK's own retries.
 
     The request ID and the retry-after / x-ratelimit-* / anthropic-* headers are
-    what distinguish one kind of 429 from another, and what Anthropic support asks for.
+    what distinguish one kind of 429 from another, and what Anthropic support asks for;
+    on Bedrock the request ID and error type come in x-amzn-* headers.
     """
     headers = {
         k: v for k, v in e.response.headers.items()
-        if k == "retry-after" or k.startswith(("x-ratelimit", "anthropic-"))
+        if k == "retry-after" or k.startswith(("x-ratelimit", "anthropic-", "x-amzn-"))
     }
     logger.error(
         "API error on round-trip %d: HTTP %s request_id=%s headers=%s body=%s",
@@ -122,7 +140,7 @@ class ClaudeHandler:
         self.state = state if state is not None else SessionState()
         registry = build_registry_block(knowledge_dir) if knowledge_dir else ""
         self.system_prompt = system_prompt + ("\n\n" + registry if registry else "")
-        self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        self.client = make_client()
         self.model = configured_model()
         # Both optional; unset, requests are exactly as before.
         # CLAUDE_EFFORT: low / medium / high / xhigh / max.

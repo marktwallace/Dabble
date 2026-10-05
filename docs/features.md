@@ -293,7 +293,7 @@ It prints the conversation path and the final reply. Do not add a turn to a conv
 
 **No sidebar conversation list.** Moved to entry screen.
 
-**LLM:** Anthropic SDK, model set by `CLAUDE_MODEL`. Synchronous (non-streaming) tool loop for v1.
+**LLM:** Anthropic SDK, model set by `CLAUDE_MODEL`, through the Claude API or Amazon Bedrock (`CLAUDE_PROVIDER`). Synchronous (non-streaming) tool loop for v1.
 
 **Analytic data:** DuckDB, read-only. Path via environment variable.
 

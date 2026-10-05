@@ -46,8 +46,10 @@ cp .env.example .env
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `CLAUDE_MODEL` | Yes | Model every request uses (e.g. `claude-opus-5-5`); also named to the model in its system prompt |
+| `CLAUDE_PROVIDER` | No | `anthropic` (default): the Claude API. `bedrock`: Amazon Bedrock's `bedrock-runtime` endpoint, signed with the AWS credentials found the usual way (instance or task role, profile, or keys) |
+| `ANTHROPIC_API_KEY` | With `anthropic` | Claude API key |
+| `AWS_REGION` | With `bedrock` | Region of the Bedrock endpoint, e.g. `us-east-1` |
+| `CLAUDE_MODEL` | Yes | Model every request uses (e.g. `claude-opus-5-5`; on Bedrock a model or inference profile ID such as `us.anthropic.claude-opus-5-5`); also named to the model in its system prompt |
 | `DUCKDB_ANALYTIC_FILE` | One database mode | Path to your DuckDB file (created on first run if absent) |
 | `DUCKDB_READ_ONLY` | No | `1`, `true` or `yes` opens the DuckDB file read-only |
 | `DABBLE_S3_BUCKET` | One database mode | DuckLake on S3: catalog downloaded from `s3://<bucket>/<prefix>/catalog.duckdb` at start and on `/refresh`, data read from `<prefix>/data/` |
