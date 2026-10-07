@@ -251,9 +251,13 @@ def _run_agent(text):
     st.session_state.tables_to_show.clear()
 
     rate_limited = False
-    with st.spinner("working..."):
+    with st.status("Working…", expanded=True) as status:
         try:
-            messages, _response = handler.run_tool_loop(st.session_state.messages)
+            messages, _response = handler.run_tool_loop(
+                st.session_state.messages,
+                on_step=lambda response: _show_step(status, response),
+            )
+            status.update(label="Done", state="complete", expanded=False)
         except anthropic.RateLimitError:
             # run_tool_loop appends to this list in place, so it holds every
             # round-trip that completed. It ends on a user turn, which the
@@ -294,6 +298,17 @@ def _run_agent(text):
             "tool_calls": [],
             "text": "The API rate limit was reached, so this turn stopped early. Wait a minute, then send your message again.",
         })
+
+
+def _show_step(status, response):
+    """Write one round-trip's text and tool calls into the live status box."""
+    for block in response.content:
+        if block.type == "text" and block.text.strip():
+            status.markdown(block.text)
+        elif block.type == "tool_use":
+            label = _expander_label(block.name, block.input)
+            status.write(f"→ {label}")
+            status.update(label=f"Working… {label}")
 
 
 def _handle_learn(attachment=None):

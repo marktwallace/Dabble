@@ -6,7 +6,7 @@ import time
 import traceback
 from pathlib import Path
 from textwrap import dedent
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -510,12 +510,15 @@ class ClaudeHandler:
 
     # --- Tool loop -----------------------------------------------------------
 
-    def run_tool_loop(self, messages: list[dict]) -> tuple[list[dict], object]:
+    def run_tool_loop(self, messages: list[dict], on_step: Optional[Callable] = None) -> tuple[list[dict], object]:
         """Run the Claude tool loop until stop_reason is not 'tool_use'.
 
         Appends all new messages (assistant turns and tool results) to the
         messages list and also returns it. The caller is responsible for
         persisting the new messages to the conversation file.
+
+        on_step, if given, is called with each response before its tools run,
+        so the caller can show progress.
         """
         system = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
         round_trip = 0
@@ -560,6 +563,11 @@ class ClaudeHandler:
                     round_trip, getattr(response, "stop_details", None),
                 )
                 break
+            if on_step:
+                # Called before the append: a Streamlit callback can be
+                # interrupted by a rerun, and messages must not be left ending
+                # on a tool_use with no tool_result.
+                on_step(response)
             messages.append({
                 "role": "assistant",
                 "content": [b.model_dump() for b in response.content],
