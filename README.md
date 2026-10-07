@@ -60,6 +60,7 @@ cp .env.example .env
 | `PROMPTS_DIR` | No | Directory holding `system_prompt.md` and the documents `read_document` reads (default: `prompts`) |
 | `CONVERSATIONS_DIR` | No | Conversation files (default: `conversations`) |
 | `KNOWLEDGE_DIR` | No | Knowledge `.txt` files (default: `knowledge`) |
+| `DABBLE_KNOWLEDGE_S3_PREFIX` | No | Where `backup_knowledge.sh` copies the knowledge files, as a prefix within `DABBLE_S3_BUCKET`; each run writes `<prefix>/<date>/` (default: `<DABBLE_S3_PREFIX>/knowledge`) |
 | `UPLOADS_DIR`, `REPORTS_DIR`, `NOTEBOOKS_DIR` | No | Uploaded files, `/report` and `/notebook` outputs (defaults: `uploads`, `reports`, `notebooks`) |
 | `DB_TIMESTAMP_QUERY` | No | SQL to read a data freshness timestamp (file mode; DuckLake modes use the latest snapshot time) |
 | `CLAUDE_EFFORT` | No | Effort level sent with every request (`low`, `medium`, `high`, `xhigh`, `max`); unset uses the model's default |
